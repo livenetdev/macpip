@@ -6,29 +6,36 @@ on:
 jobs:
   macos:
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: SWIFTFLAGS=-warnings-as-errors ./build.sh && du -sh build/MacPiP.app
-      - name: Chrome PiP → fullscreen Terminal → mirror (screenshots in log)
+      - name: Chrome PiP + fill mode (screenshots in log)
         run: |
           BIN=build/MacPiP.app/Contents/MacOS/macpip
           shot() { screencapture -x "$1.png"; sips -Z 900 -s format jpeg "$1.png" --out "$1.jpg" >/dev/null
                    echo "IMG $1 $(base64 -i "$1.jpg" | tr -d '\n')"; }
+          hotkey() { osascript -e 'tell application "System Events" to keystroke "f" using {control down, option down, command down}'; }
+          osascript -e 'tell application "System Events" to tell dock preferences to get {autohide, autohide menu bar}' || echo "dock prefs unreadable"
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 \
             --user-data-dir=/tmp/chrome --no-first-run --no-default-browser-check \
             "https://www.w3schools.com/html/mov_bbb.mp4" >/dev/null 2>&1 &
           for i in $(seq 30); do curl -sf localhost:9222/json >/dev/null && break; sleep 1; done; sleep 4
           node ci/pip.mjs; sleep 2
-          $BIN --list | grep -iE "chrome|pip=true" || true
-          MACPIP_DEBUG=1 $BIN & sleep 3
-          shot desktop
           open -a Terminal; sleep 4
-          osascript -e 'tell application "System Events" to keystroke "f" using {control down, command down}' || echo "no accessibility"
-          sleep 6
-          $BIN --list | grep "pip=true" || true
-          shot fs1; sleep 3; shot fs2
+          MACPIP_DEBUG=1 $BIN & sleep 3
+          hotkey; sleep 5
+          osascript -e 'tell application "System Events" to tell dock preferences to get {autohide, autohide menu bar}' || true
+          shot fill1; sleep 2; shot fill2
+          hotkey; sleep 4
+          osascript -e 'tell application "System Events" to tell dock preferences to get {autohide, autohide menu bar}' || true
+          shot restored
+          osascript -e 'tell application "System Events" to keystroke "f" using {control down, command down}'; sleep 5
+          hotkey; sleep 6
+          shot fromNativeFullscreen
+          hotkey; sleep 3
       - name: package universal .dmg and verify it
         run: |
           DMG=1 SWIFTFLAGS=-warnings-as-errors ./build.sh
