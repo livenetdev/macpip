@@ -10,6 +10,7 @@ BIN="$APP/Contents/MacOS/macpip"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp app/Info.plist "$APP/Contents/"
 cp app/AppIcon.icns "$APP/Contents/Resources/"
+cp -R extension "$APP/Contents/Resources/extension"
 
 [ "${DMG:-}" = 1 ] && UNIVERSAL=1
 if [ "${UNIVERSAL:-}" = 1 ]; then ARCHS="arm64 x86_64"; else ARCHS="$(uname -m)"; fi

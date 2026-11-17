@@ -6,11 +6,10 @@
   <key>CFBundleName</key><string>MacPiP</string>
   <key>CFBundleExecutable</key><string>macpip</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>3.0</string>
-  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>4.0</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>12.3</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>NSAppleEventsUsageDescription</key><string>MacPiP auto-hides the menu bar and Dock while a window fills the screen, and restores them afterwards.</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
