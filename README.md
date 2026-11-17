@@ -28,13 +28,16 @@ back on the desktop: original visible → mirror closes, capture stops
 
 ## Install
 
-macOS 12.3+, Xcode CLT (`xcode-select --install`).
+**Download:** [`dist/MacPiP.dmg`](dist/MacPiP.dmg) (universal: Apple Silicon + Intel, macOS 12.3+, 187 KB). SHA-256 in [`dist/SHA256`](dist/SHA256).
 
-```bash
-./install.sh
-```
+1. Open the DMG and drag **MacPiP** to **Applications**.
+2. First launch: the app is ad-hoc signed, not notarized, so macOS blocks it. Go to System Settings ▸ Privacy & Security ▸ **Open Anyway**. Or run:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/MacPiP.app
+   ```
+3. Allow **Screen Recording** when asked, then relaunch MacPiP.
 
-Allow **Screen Recording** when asked, then relaunch MacPiP (menu bar ▸ Quit, reopen from ~/Applications).
+**From source:** `./install.sh` (needs Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 
 ## Use
 
