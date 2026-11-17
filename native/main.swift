@@ -1,140 +1,173 @@
 import AppKit
+import ServiceManagement
 
-// Two entry modes:
-//   macpip chrome-extension://<id>/   → launched by the browser (native messaging over stdio)
-//   macpip <url> [start-seconds]      → manual / Safari / scripts
-// Process lifetime == one floating window. Closing it exits, so no WebKit state outlives it.
+// MacPiP: when a browser's own picture-in-picture window is hidden by a fullscreen
+// app, show a live mirror of it that floats above. Nothing is re-loaded, so anything
+// that plays in your browser works. No network, no extension, no data stored.
+
+func log(_ s: String) {
+    if ProcessInfo.processInfo.environment["MACPIP_DEBUG"] != nil {
+        FileHandle.standardError.write(Data("macpip: \(s)\n".utf8))
+    }
+}
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var player: PlayerWindow?
-    private var host: NativeHost?
-    private var status: NSStatusItem?
-    private let ghostItem = NSMenuItem(title: "Click-through", action: #selector(toggleGhost), keyEquivalent: "")
+    private let defaults = UserDefaults.standard
+    private var status: NSStatusItem!
+    private var mirror: Mirror?
+    private var pinned: CGWindowID?
+    private var dismissed = Set<CGWindowID>()
+    private var lastFrame: NSRect?
+    private var clickThrough = false
+    private var auto: Bool { defaults.object(forKey: "auto") as? Bool ?? true }
+
+    private let menu = NSMenu()
+    private let pinMenu = NSMenu()
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        let args = Array(CommandLine.arguments.dropFirst())
-        if args.first?.hasPrefix("chrome-extension://") == true {
-            host = NativeHost(onMessage: { [weak self] in self?.handle($0) },
-                              onEOF: { [weak self] in if self?.player == nil { exit(0) } })
-            host?.start()
-        } else if let s = args.first, let req = Request(url: s, time: args.count > 1 ? Double(args[1]) : nil) {
-            open(req)
-        } else {
-            FileHandle.standardError.write(Data("usage: macpip <video-url> [start-seconds]\n".utf8))
-            exit(64)
-        }
-    }
-
-    private func handle(_ m: [String: Any]) {
-        guard m["action"] as? String == "open", let req = Request(message: m) else {
-            host?.send(["type": "error"]); return
-        }
-        open(req)
-        host?.send(["type": "opened"])
-    }
-
-    private func open(_ req: Request) {
-        if player == nil {
-            let p = PlayerWindow(frame: NSRect(x: 0, y: 0, width: 480, height: 270))
-            p.onClose = { [weak self] t in
-                self?.host?.send(["type": "closed", "t": t])
-                exit(0)
+        let args = CommandLine.arguments
+        if args.contains("--list") {
+            for w in Windows.all() where w.bounds.width > 50 {
+                print("\(w.id)\tlayer=\(w.layer)\tonscreen=\(w.onScreen)\tpip=\(Windows.isPiP(w))\t\(w.owner) — \(w.title)")
             }
-            player = p
-            buildStatusItem()
+            exit(0)
         }
-        player?.play(req)
+        if let i = args.firstIndex(of: "--window"), i + 1 < args.count, let id = CGWindowID(args[i + 1]) { pinned = id }
+
+        log("screen recording permission: \(CGPreflightScreenCaptureAccess())")
+        if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+        buildStatusItem()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(tick),
+                                                          name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        let t = Timer(timeInterval: 1, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        t.tolerance = 0.25
+        RunLoop.main.add(t, forMode: .common)
+        tick()
     }
 
-    // MARK: Menu bar item — the only way back from click-through mode.
+    // MARK: Watcher — one CGWindowList call per second; capture runs only while a mirror is shown.
+
+    @objc private func tick() {
+        let wins = Windows.all()
+        let ids = Set(wins.map(\.id))
+        dismissed.formIntersection(ids)
+        if let p = pinned, !ids.contains(p) { pinned = nil }
+
+        let target = pinned.flatMap { p in wins.first { $0.id == p } }
+            ?? (auto ? wins.filter { Windows.isPiP($0) && !dismissed.contains($0.id) }.max { $0.id < $1.id } : nil)
+
+        // Mirror only while the original can't be seen (e.g. you're in a fullscreen app).
+        guard let t = target, !t.onScreen, CGPreflightScreenCaptureAccess() else { return hideMirror() }
+        if let m = mirror, m.source == t.id { return m.sourceChanged(t) }
+
+        hideMirror()
+        log("mirroring \(t.id) \(t.owner) — \(t.title)")
+        let m = Mirror(source: t, frame: lastFrame, opacity: CGFloat(defaults.object(forKey: "opacity") as? Double ?? 1),
+                       clickThrough: clickThrough)
+        m.onFrameChange = { [weak self] f in self?.lastFrame = f }
+        m.onDismiss = { [weak self] in
+            self?.dismissed.insert(t.id)
+            if self?.pinned == t.id { self?.pinned = nil }
+            self?.hideMirror()
+        }
+        mirror = m
+        m.start()
+    }
+
+    private func hideMirror() {
+        mirror?.stop()
+        mirror = nil
+    }
+
+    // MARK: Menu bar
 
     private func buildStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "pip", accessibilityDescription: "MacPiP")
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
+        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        status.button?.image = NSImage(systemSymbolName: "pip", accessibilityDescription: "MacPiP")
         menu.delegate = self
-        ghostItem.target = self
-        menu.addItem(ghostItem)
+        status.menu = menu
+    }
+
+    func menuNeedsUpdate(_ m: NSMenu) {
+        guard m === menu else { return }
+        m.removeAllItems()
+        if !CGPreflightScreenCaptureAccess() {
+            m.addItem(item("Grant Screen Recording…", #selector(openPrivacy)))
+            m.addItem(.separator())
+        }
+        m.addItem(item("Float browser PiP over fullscreen apps", #selector(toggleAuto), on: auto))
+
+        let pin = NSMenuItem(title: "Float a window", action: nil, keyEquivalent: "")
+        pinMenu.removeAllItems()
+        for w in Windows.pinnable(Windows.all()).prefix(30) {
+            let title = w.title.isEmpty ? w.owner : "\(w.owner) — \(w.title.prefix(50))"
+            let i = item(title, #selector(pinWindow(_:)), on: pinned == w.id)
+            i.tag = Int(w.id)
+            pinMenu.addItem(i)
+        }
+        if pinMenu.items.isEmpty { pinMenu.addItem(NSMenuItem(title: "No windows", action: nil, keyEquivalent: "")) }
+        pin.submenu = pinMenu
+        m.addItem(pin)
+        m.addItem(.separator())
 
         let op = NSMenuItem(title: "Opacity", action: nil, keyEquivalent: "")
         let opMenu = NSMenu()
         for pct in [100, 80, 60, 40, 20] {
-            let i = NSMenuItem(title: "\(pct)%", action: #selector(setOpacity(_:)), keyEquivalent: "")
-            i.target = self; i.tag = pct
+            let i = item("\(pct)%", #selector(setOpacity(_:)))
+            i.tag = pct
             opMenu.addItem(i)
         }
         op.submenu = opMenu
-        menu.addItem(op)
-
+        m.addItem(op)
+        m.addItem(item("Click-through", #selector(toggleGhost), on: clickThrough))
         let mv = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
         let mvMenu = NSMenu()
         for (i, name) in ["Top Left", "Top Right", "Bottom Left", "Bottom Right"].enumerated() {
-            let c = NSMenuItem(title: name, action: #selector(snap(_:)), keyEquivalent: "")
-            c.target = self; c.tag = i
+            let c = item(name, #selector(snap(_:)))
+            c.tag = i
             mvMenu.addItem(c)
         }
         mv.submenu = mvMenu
-        menu.addItem(mv)
-
-        menu.addItem(.separator())
-        let close = NSMenuItem(title: "Close", action: #selector(closePlayer), keyEquivalent: "")
-        close.target = self
-        menu.addItem(close)
-
-        item.menu = menu
-        status = item
-    }
-
-    func menuWillOpen(_ menu: NSMenu) { ghostItem.state = player?.clickThrough == true ? .on : .off }
-    @objc private func toggleGhost() { player?.clickThrough.toggle() }
-    @objc private func setOpacity(_ sender: NSMenuItem) { player?.setOpacity(CGFloat(sender.tag) / 100) }
-    @objc private func snap(_ sender: NSMenuItem) { player?.snap(sender.tag) }
-    @objc private func closePlayer() { player?.close() }
-}
-
-// MARK: - Chrome native messaging: UInt32 little-endian length + UTF-8 JSON, both directions.
-
-final class NativeHost {
-    private let onMessage: ([String: Any]) -> Void
-    private let onEOF: () -> Void
-    private let out = FileHandle.standardOutput
-
-    init(onMessage: @escaping ([String: Any]) -> Void, onEOF: @escaping () -> Void) {
-        self.onMessage = onMessage
-        self.onEOF = onEOF
-    }
-
-    func start() {
-        Thread.detachNewThread { [self] in
-            let input = FileHandle.standardInput
-            while true {
-                let head = input.readData(ofLength: 4)
-                guard head.count == 4 else { break }
-                let len = Int(UInt32(head[0]) | UInt32(head[1]) << 8 | UInt32(head[2]) << 16 | UInt32(head[3]) << 24)
-                guard len > 0, len <= 65_536 else { break }
-                var body = Data()
-                while body.count < len {
-                    let chunk = input.readData(ofLength: len - body.count)
-                    if chunk.isEmpty { break }
-                    body.append(chunk)
-                }
-                guard body.count == len else { break }
-                if let obj = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
-                    DispatchQueue.main.async { self.onMessage(obj) }
-                }
-            }
-            DispatchQueue.main.async { self.onEOF() }
+        m.addItem(mv)
+        m.addItem(item("Stop floating", #selector(stopFloating)))
+        m.addItem(.separator())
+        if #available(macOS 13.0, *) {
+            m.addItem(item("Launch at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
+        m.addItem(item("Quit MacPiP", #selector(quit)))
     }
 
-    /// Synchronous so a final message is flushed before exit().
-    func send(_ obj: [String: Any]) {
-        guard let body = try? JSONSerialization.data(withJSONObject: obj) else { return }
-        let len = withUnsafeBytes(of: UInt32(body.count).littleEndian) { Data($0) }
-        out.write(len + body)
+    private func item(_ title: String, _ action: Selector, on: Bool = false) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        i.target = self
+        i.state = on ? .on : .off
+        return i
     }
+
+    @objc private func openPrivacy() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    }
+    @objc private func toggleAuto() { defaults.set(!auto, forKey: "auto"); tick() }
+    @objc private func pinWindow(_ s: NSMenuItem) {
+        let id = CGWindowID(s.tag)
+        pinned = pinned == id ? nil : id
+        dismissed.remove(id)
+        tick()
+    }
+    @objc private func setOpacity(_ s: NSMenuItem) {
+        defaults.set(Double(s.tag) / 100, forKey: "opacity")
+        mirror?.alphaValue = CGFloat(s.tag) / 100
+    }
+    @objc private func toggleGhost() { clickThrough.toggle(); mirror?.clickThrough = clickThrough }
+    @objc private func snap(_ s: NSMenuItem) { mirror?.snap(s.tag) }
+    @objc private func stopFloating() { mirror?.onDismiss?() }
+    @available(macOS 13.0, *)
+    @objc private func toggleLogin() {
+        let s = SMAppService.mainApp
+        do { if s.status == .enabled { try s.unregister() } else { try s.register() } }
+        catch { log("login item: \(error.localizedDescription)") }
+    }
+    @objc private func quit() { NSApp.terminate(nil) }
 }
 
 let app = NSApplication.shared

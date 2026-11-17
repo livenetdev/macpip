@@ -5,39 +5,24 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: swiftc -O -wmo -warnings-as-errors -target arm64-apple-macos12 -o macpip native/*.swift
-      - run: ls -lh macpip
-      - run: node --check extension/background.js
-      - name: native messaging round-trip (malformed request → error reply)
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: SWIFTFLAGS=-warnings-as-errors ./build.sh && du -sh build/MacPiP.app
+      - name: Chrome PiP → fullscreen Terminal → mirror (screenshots in log)
         run: |
-          python3 - <<'PY'
-          import json, struct, subprocess
-          p = subprocess.Popen(["./macpip", "chrome-extension://x/"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-          msg = json.dumps({"action": "open", "url": "file:///etc/passwd"}).encode()
-          p.stdin.write(struct.pack("<I", len(msg)) + msg); p.stdin.flush()
-          n = struct.unpack("<I", p.stdout.read(4))[0]
-          reply = json.loads(p.stdout.read(n)); print(reply)
-          assert reply == {"type": "error"}, reply
-          p.stdin.close(); assert p.wait(timeout=10) == 0
-          PY
-      - name: smoke — window floats and plays (screenshots in log)
-        if: env.SMOKE == '1'
-        env: { SMOKE: '1' }
-        run: |
-          cat > /tmp/win.swift <<'SW'
-          import CoreGraphics
-          let l = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
-          let m = l.filter { ($0[kCGWindowOwnerName as String] as? String) == "macpip" }
-          for w in m { print("window layer=\(w[kCGWindowLayer as String]!) bounds=\(w[kCGWindowBounds as String]!)") }
-          if m.isEmpty { print("NO WINDOW"); exit(1) }
-          SW
-          shot() { ./macpip "$1" 30 & pid=$!; sleep 14; swift /tmp/win.swift || true; screencapture -x "$2.png"; kill $pid || true; sleep 1
-                   sips -Z 900 -s format jpeg "$2.png" --out "$2.jpg" >/dev/null; echo "IMG $2 $(base64 -i "$2.jpg" | tr -d '\n')"; }
-          shot "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" direct
-          shot "https://www.w3schools.com/html/html5_video.asp" page
-          shot "https://www.youtube.com/watch?v=aqz-KE-bpKQ" youtube
-          # core feature: float over a fullscreen app (needs Accessibility for keystroke; best effort)
+          BIN=build/MacPiP.app/Contents/MacOS/macpip
+          shot() { screencapture -x "$1.png"; sips -Z 900 -s format jpeg "$1.png" --out "$1.jpg" >/dev/null
+                   echo "IMG $1 $(base64 -i "$1.jpg" | tr -d '\n')"; }
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/chrome --no-first-run --no-default-browser-check \
+            "https://www.w3schools.com/html/mov_bbb.mp4" >/dev/null 2>&1 &
+          for i in $(seq 30); do curl -sf localhost:9222/json >/dev/null && break; sleep 1; done; sleep 4
+          node ci/pip.mjs; sleep 2
+          $BIN --list | grep -iE "chrome|pip=true" || true
+          MACPIP_DEBUG=1 $BIN & sleep 3
+          shot desktop
           open -a Terminal; sleep 4
           osascript -e 'tell application "System Events" to keystroke "f" using {control down, command down}' || echo "no accessibility"
-          sleep 4
-          shot "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" fullscreen
+          sleep 6
+          $BIN --list | grep "pip=true" || true
+          shot fs1; sleep 3; shot fs2
