@@ -1,5 +1,8 @@
 name: build
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore: ['dist/**']
+  pull_request:
 jobs:
   macos:
     runs-on: macos-latest
@@ -26,3 +29,16 @@ jobs:
           sleep 6
           $BIN --list | grep "pip=true" || true
           shot fs1; sleep 3; shot fs2
+      - name: package universal .dmg and verify it
+        run: |
+          DMG=1 SWIFTFLAGS=-warnings-as-errors ./build.sh
+          hdiutil attach -quiet -nobrowse -mountpoint /tmp/m build/MacPiP.dmg
+          ls -la /tmp/m
+          lipo -archs /tmp/m/MacPiP.app/Contents/MacOS/macpip
+          codesign --verify --deep --strict /tmp/m/MacPiP.app && echo "codesign ok"
+          /tmp/m/MacPiP.app/Contents/MacOS/macpip --list | head -2
+          hdiutil detach -quiet /tmp/m
+          ls -l build/MacPiP.dmg; shasum -a 256 build/MacPiP.dmg
+          echo "DMG $(base64 -i build/MacPiP.dmg | tr -d '\n')"
+      - uses: actions/upload-artifact@v4
+        with: { name: MacPiP-dmg, path: build/MacPiP.dmg }
