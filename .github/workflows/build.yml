@@ -43,7 +43,7 @@ jobs:
           ls -la /tmp/m
           lipo -archs /tmp/m/MacPiP.app/Contents/MacOS/macpip
           codesign --verify --deep --strict /tmp/m/MacPiP.app && echo "codesign ok"
-          /tmp/m/MacPiP.app/Contents/MacOS/macpip --list | head -2
+          plutil -p /tmp/m/MacPiP.app/Contents/Info.plist | grep -E "Version|Identifier"
           hdiutil detach -quiet /tmp/m
           ls -l build/MacPiP.dmg; shasum -a 256 build/MacPiP.dmg
           echo "DMG $(base64 -i build/MacPiP.dmg | tr -d '\n')"
