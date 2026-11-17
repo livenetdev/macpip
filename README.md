@@ -24,6 +24,7 @@ click extension / ⌥⇧P ──activeTab──▶ probe video ──stdio──
 | Popups / camera / mic | default | blocked / blocked / denied |
 | Native host access | prompted ID, wildcard fallback | fixed extension ID pinned via manifest `key` |
 | Process | stays alive | exits when window closes |
+| Window level | `.floating` (same as upstream in practice) | `.floating` + `fullScreenAuxiliary` |
 | Code | ~4.2k lines | ~830 lines |
 | Browsers | Chrome | Chrome, Brave, Edge, Arc, Vivaldi, Chromium + CLI (Safari, scripts) |
 

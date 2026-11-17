@@ -4,7 +4,7 @@ import WebKit
 /// The floating window. Key properties for floating over fullscreen apps:
 ///   • accessory app (no Dock icon) + non-activating NSPanel
 ///   • collectionBehavior .canJoinAllSpaces + .fullScreenAuxiliary
-///   • window level above everything
+///   • floating level (stays below menus, Spotlight, Notification Center)
 final class PlayerWindow: NSPanel, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     var onClose: ((Double) -> Void)?
     var clickThrough = false {
@@ -25,9 +25,8 @@ final class PlayerWindow: NSPanel, NSWindowDelegate, WKNavigationDelegate, WKUID
         super.init(contentRect: start,
                    styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)) + 1)
+        isFloatingPanel = true   // sets level = .floating; fullScreenAuxiliary is what gets it into fullscreen Spaces
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        isFloatingPanel = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         titleVisibility = .hidden
