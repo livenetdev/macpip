@@ -8,4 +8,4 @@ pkill -x macpip 2>/dev/null || true
 rm -rf "$HOME/Applications/MacPiP.app"
 cp -R build/MacPiP.app "$HOME/Applications/"
 open "$HOME/Applications/MacPiP.app"
-echo "Installed ~/Applications/MacPiP.app — allow Screen Recording when asked, then relaunch it."
+echo "Installed ~/Applications/MacPiP.app — allow Accessibility when asked. ⌃⌥⌘F fills the screen with the front window."
