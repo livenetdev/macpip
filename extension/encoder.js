@@ -4,6 +4,7 @@
 globalThis.MacPiPEncoder ??= class {
   constructor(send) {
     this.send = send;
+    this.hw = 'prefer-hardware';
     this.enc = null;
     this.w = this.h = this.n = 0;
     this.wantKey = true;
@@ -22,12 +23,12 @@ globalThis.MacPiPEncoder ??= class {
       const s = Math.min(1, 1920 / w, 1080 / h); // cap at 1080p: plenty for a PiP, cheap to encode
       w = Math.max(2, Math.round((w * s) / 2) * 2);
       h = Math.max(2, Math.round((h * s) / 2) * 2);
-      if (!this.enc || this.enc.state === 'closed' || w !== this.w || h !== this.h) this.configure(w, h);
+      if (!this.enc || this.enc.state !== 'configured' || w !== this.w || h !== this.h) this.configure(w, h);
       if (this.enc.encodeQueueSize > 2) return; // behind: drop, never queue latency
       this.enc.encode(frame, { keyFrame: this.wantKey || this.n++ % 180 === 0 });
       this.wantKey = false;
     } catch (e) {
-      console.warn('MacPiP encode', e);
+      this.send({ k: 'log', msg: `encode: ${e.message}` });
     } finally {
       frame.close();
     }
@@ -47,7 +48,11 @@ globalThis.MacPiPEncoder ??= class {
         chunk.copyTo(buf);
         this.send({ k: 'f', key: chunk.type === 'key', d: MacPiPEncoder.b64(buf) });
       },
-      error: (e) => { console.warn('MacPiP encoder', e); this.enc = null; },
+      error: (e) => {
+        this.send({ k: 'log', msg: `encoder ${this.hw}: ${e.message}` });
+        this.enc = null;
+        if (this.hw === 'prefer-hardware') this.hw = 'no-preference'; // e.g. VMs without a hardware encoder
+      },
     });
     this.enc.configure({
       codec: 'avc1.640033',
@@ -55,7 +60,7 @@ globalThis.MacPiPEncoder ??= class {
       bitrate: Math.min(12e6, Math.max(2e6, w * h * 4)),
       framerate: 60,
       latencyMode: 'realtime',
-      hardwareAcceleration: 'prefer-hardware',
+      hardwareAcceleration: this.hw,
       avc: { format: 'avc' },
     });
   }

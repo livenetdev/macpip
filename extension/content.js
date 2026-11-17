@@ -12,7 +12,7 @@
   const port = chrome.runtime.connect({ name: 'content' });
   if (!v) { port.postMessage({ k: 'none' }); port.disconnect(); return; }
 
-  let stopped = false, crop = false, raf = 0;
+  let stopped = false, crop = false, raf = 0, errs = 0;
   const enc = new MacPiPEncoder((m) => { if (!stopped) port.postMessage(m); });
 
   const state = () => port.postMessage({ k: 'state', paused: v.paused, muted: v.muted, t: v.currentTime, dur: isFinite(v.duration) ? v.duration : 0 });
@@ -32,6 +32,7 @@
       try {
         enc.encode(new VideoFrame(v, { timestamp: Math.round(performance.now() * 1000) }));
       } catch (e) {
+        if (errs++ < 5) port.postMessage({ k: 'log', msg: `VideoFrame: ${e.name} ${e.message}` });
         if (e.name === 'SecurityError') {
           crop = true;
           port.postMessage({ k: 'crop' });

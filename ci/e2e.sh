@@ -41,4 +41,4 @@ echo "== MacPiP active, Chrome hidden behind fullscreen Terminal"
 fullscreenTerminal
 node ci/cdp.mjs measure
 wins; shot fs1; sleep 2; shot fs2
-grep -i macpip /tmp/cft-out.log | tail -5 || true
+grep -ai "macpip" /tmp/cft-out.log | tail -30 || true

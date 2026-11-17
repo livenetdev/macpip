@@ -35,10 +35,17 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var counts: [String: Int] = [:]
+
     private func handle(_ m: [String: Any]) {
-        switch m["k"] as? String {
+        let k = m["k"] as? String ?? "?"
+        counts[k, default: 0] += 1
+        if k != "f" || counts["f"] == 1 || counts["f"]! % 120 == 0 { log("recv \(k) #\(counts[k]!)") }
+        switch k {
         case "hello":
-            ensurePlayer().setTitle(m["title"] as? String ?? "")
+            let p = ensurePlayer()
+            p.setTitle(m["title"] as? String ?? "")
+            p.orderFrontRegardless()
         case "cfg":
             guard let w = m["w"] as? Int, let h = m["h"] as? Int,
                   let s = m["avcc"] as? String, let avcc = Data(base64Encoded: s) else { return }
@@ -48,6 +55,8 @@ final class App: NSObject, NSApplicationDelegate {
             player?.enqueue(d, key: m["key"] as? Bool ?? false)
         case "state":
             player?.setState(paused: m["paused"] as? Bool ?? false, muted: m["muted"] as? Bool ?? false)
+        case "log":
+            log("extension: \(m["msg"] as? String ?? "")")
         case "bye":
             exit(0)
         default:
