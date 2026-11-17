@@ -1,72 +1,64 @@
 # MacPiP
 
-Picture-in-picture that floats above **fullscreen** macOS apps and across all Spaces. Privacy-first, minimal rewrite of [FullFloatPiP](https://github.com/Sigmame/full-float-pip).
+Makes your browser's **own** picture-in-picture window visible over **fullscreen** macOS apps.
+
+Rule: *if it plays in your browser's PiP, it plays over fullscreen apps.* Nothing is re-loaded. The browser keeps playing with its own login, DRM session, codecs and audio, and MacPiP shows a live view of that window.
 
 ```
-click extension / ⌥⇧P ──activeTab──▶ probe video ──stdio──▶ macpip (Swift)
-                                                             └─ NSPanel, level max, canJoinAllSpaces + fullScreenAuxiliary
-                                                                └─ WKWebView: ephemeral store, tracker rules, isolated JS world
+browser PiP window ──(you enter a fullscreen app: PiP is hidden)──▶ MacPiP
+   plays video, audio, owns session                                  ├─ ScreenCaptureKit: that one window, GPU zero-copy
+                                                                     └─ NSPanel: .floating + fullScreenAuxiliary + all Spaces
+back on the desktop: original visible → mirror closes, capture stops
 ```
 
-## vs FullFloatPiP
+## Why not FullFloatPiP's approach
 
 | | FullFloatPiP | MacPiP |
 |---|---|---|
-| Page access | content script on **every site**, always running | none until you click (`activeTab`) |
-| Permissions | `cookies`, `scripting`, `activeTab`, `nativeMessaging`, host perms (youtube, google) | `activeTab`, `scripting`, `nativeMessaging` |
-| Your login cookies | **all `.youtube.com` + `.google.com` cookies copied** into the player | never read |
-| WebKit storage | default (persistent on disk) | `nonPersistent()` — memory only, gone on close |
-| YouTube | full watch page + ad-skip click injection | `youtube-nocookie.com` embed; watch page only as fallback |
-| Trackers | — | 26 ad/analytics domains + YouTube telemetry paths blocked |
-| Open ports | local HTTP server | none |
-| Logs | `~/Library/Logs/FloatVideo/native-host.log` | none |
-| Injected JS | page world | isolated `WKContentWorld` (pages can't read/forge it) |
-| Popups / camera / mic | default | blocked / blocked / denied |
-| Native host access | prompted ID, wildcard fallback | fixed extension ID pinned via manifest `key` |
-| Process | stays alive | exits when window closes |
-| Window level | `.floating` (same as upstream in practice) | `.floating` + `fullScreenAuxiliary` |
-| Code | ~4.2k lines | ~830 lines |
-| Browsers | Chrome | Chrome, Brave, Edge, Arc, Vivaldi, Chromium + CLI (Safari, scripts) |
+| How it works | re-opens the page in its own WebKit view | mirrors the browser's native PiP window |
+| Logins / Premium / members-only | ✗ (forwards your YouTube + Google cookies to attempt it) | ✓ untouched, your browser keeps the session |
+| Bot checks ("Sign in to confirm you're not a bot") | hits them as a fresh client | ✓ none, nothing new is loaded |
+| Site support | per-site hacks (embeds, ad-skip, DOM isolation) | any site, any browser, any player |
+| Browser extension | required; content script on every site | none |
+| Network requests made | yes (local HTTP server + page reloads) | **none** |
+| Data stored | WebKit storage, log file | position + opacity prefs only |
+| Permission | — | Screen Recording (captures only the single window it mirrors, locally) |
+| Code | ~4.2k lines | ~430 lines Swift |
+| CPU when idle | background process + port | 1 window-list check/s; capture only while mirror shown |
 
 ## Install
 
-Requires macOS 12+, Xcode CLT (`xcode-select --install`).
+macOS 12.3+, Xcode CLT (`xcode-select --install`).
 
 ```bash
 ./install.sh
 ```
 
-Then `chrome://extensions` → Developer mode → Load unpacked → `extension/`.
+Allow **Screen Recording** when asked, then relaunch MacPiP (menu bar ▸ Quit, reopen from ~/Applications).
 
 ## Use
 
+1. Start PiP in your browser as usual (PiP button, right-click ▸ Picture in Picture, or Chrome's auto-PiP).
+2. Go into any fullscreen app. The PiP stays on top.
+
 | Action | How |
 |---|---|
-| Float | toolbar icon or ⌥⇧P (tab video pauses; resumes at PiP position on close) |
-| Any URL / Safari | `~/Library/Application\ Support/MacPiP/macpip <url> [seconds]` |
-| Move | drag top bar, or ⌘-drag anywhere |
-| Resize | window edges (aspect locked) |
-| Opacity | ◐ in top bar, or menu bar ▸ Opacity |
-| Click-through | ✋ in top bar; undo in menu bar |
+| Move | drag anywhere on the mirror |
+| Resize | edges (aspect locked) |
+| Play / pause | keyboard media keys (go to the browser) |
+| Go to original | double-click, or ↗ in hover bar |
+| Opacity / click-through | hover bar or menu bar ▸ Opacity / Click-through |
 | Snap to corner | menu bar ▸ Move to |
-| Close | Esc, ⌘W, ✕ |
-
-## Loading strategy
-
-| Source | Mode |
-|---|---|
-| YouTube (watch, shorts, live, youtu.be, embeds) | `youtube-nocookie` embed → watch page if embedding disabled |
-| Vimeo | `player.vimeo.com` with `dnt=1` |
-| `<video>` with http(s) src | bare `<video>` → page on error |
-| Anything else (MSE/blob streams, Twitch…) | load page, hide everything but the largest video/iframe |
-| No video on page | floats the page itself |
+| Float any other window (IINA, VLC, Zoom…) over fullscreen apps | menu bar ▸ Float a window |
+| Stop | Esc, ✕, menu bar ▸ Stop floating |
+| Auto-start | menu bar ▸ Launch at login (macOS 13+) |
 
 ## Limits
 
-- No logins (ephemeral session by design) → members-only/premium content won't play.
-- DRM (Netflix, Disney+) won't play.
-- EU YouTube fallback page may show a consent dialog once per window.
-- Dropped vs upstream: custom control bar, no audio-track/subtitle menu; uses each player's own controls.
+- The mirror is view-only: use media keys, or double-click to jump back to the original.
+- DRM video (Netflix, Disney+, Apple TV+) may mirror as black, because macOS blocks capture of protected video (unverified).
+- macOS 15+ periodically re-asks for Screen Recording permission (OS behaviour).
+- Ad-hoc signed: rebuilding resets the Screen Recording permission.
 
 ## Uninstall
 
@@ -74,4 +66,4 @@ Then `chrome://extensions` → Developer mode → Load unpacked → `extension/`
 ./uninstall.sh
 ```
 
-MIT. Derived from FullFloatPiP (MIT, © Sigmame).
+MIT. Inspired by FullFloatPiP (MIT, © Sigmame).
