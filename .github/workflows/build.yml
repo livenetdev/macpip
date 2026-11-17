@@ -5,7 +5,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: swiftc -O -wmo -target arm64-apple-macos12 -o macpip native/*.swift
+      - run: swiftc -O -wmo -warnings-as-errors -target arm64-apple-macos12 -o macpip native/*.swift
       - run: ls -lh macpip
       - run: node --check extension/background.js
       - name: native messaging round-trip (malformed request → error reply)
@@ -20,3 +20,19 @@ jobs:
           assert reply == {"type": "error"}, reply
           p.stdin.close(); assert p.wait(timeout=10) == 0
           PY
+      - name: smoke — window floats and plays (screenshots in log)
+        if: env.SMOKE == '1'
+        env: { SMOKE: '1' }
+        run: |
+          cat > /tmp/win.swift <<'SW'
+          import CoreGraphics
+          let l = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+          let m = l.filter { ($0[kCGWindowOwnerName as String] as? String) == "macpip" }
+          for w in m { print("window layer=\(w[kCGWindowLayer as String]!) bounds=\(w[kCGWindowBounds as String]!)") }
+          if m.isEmpty { print("NO WINDOW"); exit(1) }
+          SW
+          shot() { ./macpip "$1" 30 & pid=$!; sleep 14; swift /tmp/win.swift || true; screencapture -x "$2.png"; kill $pid || true; sleep 1
+                   sips -Z 900 -s format jpeg "$2.png" --out "$2.jpg" >/dev/null; echo "IMG $2 $(base64 -i "$2.jpg" | tr -d '\n')"; }
+          shot "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4" direct
+          shot "https://www.youtube.com/watch?v=aqz-KE-bpKQ" youtube
+          shot "https://vimeo.com/76979871" vimeo
