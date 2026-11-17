@@ -21,8 +21,8 @@ final class PlayerWindow: NSPanel, NSWindowDelegate, WKNavigationDelegate, WKUID
     private var closing = false
     private let defaults = UserDefaults.standard
 
-    init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 480, height: 270),
+    init(frame start: NSRect) {
+        super.init(contentRect: start,
                    styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)) + 1)
@@ -70,6 +70,8 @@ final class PlayerWindow: NSPanel, NSWindowDelegate, WKNavigationDelegate, WKUID
             return e
         }
     }
+
+    required init?(coder: NSCoder) { fatalError() }
 
     // MARK: Loading
 
@@ -158,7 +160,7 @@ final class PlayerWindow: NSPanel, NSWindowDelegate, WKNavigationDelegate, WKUID
                  windowFeatures f: WKWindowFeatures) -> WKWebView? {
         // A link the user clicked (e.g. "Watch on YouTube") opens in their default browser.
         if a.navigationType == .linkActivated, let u = a.request.url, ["https", "http"].contains(u.scheme ?? "") {
-            NSWorkspace.shared.open(u)
+            _ = NSWorkspace.shared.open(u)
         }
         return nil
     }

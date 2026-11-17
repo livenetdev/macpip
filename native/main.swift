@@ -35,7 +35,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func open(_ req: Request) {
         if player == nil {
-            let p = PlayerWindow()
+            let p = PlayerWindow(frame: NSRect(x: 0, y: 0, width: 480, height: 270))
             p.onClose = { [weak self] t in
                 self?.host?.send(["type": "closed", "t": t])
                 exit(0)
