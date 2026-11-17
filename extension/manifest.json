@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "MacPiP",
+  "version": "1.0.0",
+  "description": "Float the current video above everything on macOS, including fullscreen apps. Reads nothing until you click.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3QdwMYhSGIPIuAsoz174EmlYuNnHRbHPfrT/aRrcqzxgd4OoPPLPMu+o3iDHZY5AFBwDG7OuafmVDtwnyveLw/RPzVtllykF8mnMkoBz0Bf+UZLAB5VlByukXLMsEVDSB2ZMnEc2f5hgzqft8HubnMcwzyNhWyiJDBZXNXCKZ45ku3cxQMbzIZbPm1NlcieWBGcgcVCr3GzmAjQBtdOjWxqQh4cQQK47/HHjPAiZrWB8W2daFMDmmd42LJ1MwOYmBTKPSgyIIFHuJWFrxnq6Y824pVG5ipqFLo4H06RID3kFPKwtJYcuwLMKuSnuog97qxPEdqcQb1XpnG/OPk4pyQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Float video (⌥⇧P)",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+P" } }
+  },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+}
