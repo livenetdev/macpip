@@ -8,7 +8,7 @@ shot() { screencapture -x "$1.png"; sips -Z 900 -s format jpeg "$1.png" --out "$
 wins() { swift - <<'SW'
 import CoreGraphics
 let l = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
-for w in l where (w[kCGWindowOwnerName as String] as? String) == "macpip" { print("macpip window layer=\(w[kCGWindowLayer as String]!) bounds=\(w[kCGWindowBounds as String]!)") }
+for w in l where ["macpip", "MacPiP"].contains(w[kCGWindowOwnerName as String] as? String ?? "") { print("macpip window layer=\(w[kCGWindowLayer as String]!) bounds=\(w[kCGWindowBounds as String]!)") }
 SW
 }
 fullscreenTerminal() { open -a Terminal; sleep 3; osascript -e 'tell application "System Events" to keystroke "f" using {control down, command down}'; sleep 6; }

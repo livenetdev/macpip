@@ -1,67 +1,63 @@
 # MacPiP
 
-Keep your browser's **own** picture-in-picture visible while you work fullscreen on macOS.
-
-**⌃⌥⌘F** fills the screen with the front window and auto-hides the menu bar and Dock, all on the **current Space**. Chrome, Firefox, Arc, Brave and Edge PiP windows float above every normal window on their Space, so the PiP stays on top: live, clickable, with sound, signed in. Press ⌃⌥⌘F again to put everything back.
+Picture-in-picture that floats over **native fullscreen** macOS apps. The video keeps playing in **your browser tab**, with your login, Premium, your audio and your session. MacPiP shows it above everything.
 
 ```
-native fullscreen (⌃⌘F)          MacPiP fill (⌃⌥⌘F)
-┌─ separate Space ──────┐         ┌─ same Space ──────────┐
-│ app                   │         │ app (fills screen)    │
-│   browser PiP: ✗ gone │         │        ┌──────────┐   │
-└───────────────────────┘         │        │ PiP ✓ live│  │
-                                  └────────┴──────────┴───┘
+your tab (Chrome, Brave, Edge, Arc, Vivaldi)          MacPiP.app
+ └─ <video> playing, your session                      └─ window allowed into fullscreen Spaces
+     └─ extension: video frames → H.264 (WebCodecs) ──native messaging──▶ hardware decode → display
+     └─ tab capture held → Chrome keeps rendering the hidden tab at full rate
+                                        ◀── play/pause, ±10 s, mute ──
 ```
 
-## Why not mirror or re-load the video
+## Why this design
 
-| Approach | Problem |
-|---|---|
-| Re-open the video in a separate player (FullFloatPiP) | no login / DRM / Premium, bot checks, per-site hacks, copies your cookies |
-| Capture the browser's PiP window into an overlay (ScreenCaptureKit) | macOS stops updating windows on other Spaces, so the overlay **freezes** ([OBS #7051](https://github.com/obsproject/obs-studio/issues/7051), [cua #4996](https://github.com/trycua/cua/pull/4996)) |
-| Put the browser's PiP into the fullscreen Space | needs private window-server APIs with SIP disabled |
-| **Don't create a new Space** (MacPiP) | ✓ nothing to capture or re-load; it's the browser's real PiP |
+| Approach | Over native fullscreen | Your session/login | Problem |
+|---|---|---|---|
+| Browser's own PiP (Chrome, Firefox…) | ✗ | ✓ | macOS keeps it out of fullscreen Spaces |
+| Re-load the video in a separate player (FullFloatPiP) | ✓ | ✗ | no login/DRM, bot checks, per-site hacks |
+| Capture the browser's PiP window | ✗ freezes | ✓ | macOS and Chrome stop updating hidden windows ([OBS #7051](https://github.com/obsproject/obs-studio/issues/7051), [cua #4996](https://github.com/trycua/cua/pull/4996)) |
+| Fill the screen on the same Space | not real fullscreen | ✓ | not a fullscreen Space |
+| **Stream the tab's video to MacPiP** | ✓ | ✓ | needs an extension + app |
 
-Safari's PiP already floats over fullscreen apps (per guides; not tested here). MacPiP is for the other browsers.
+## Verified on macOS 26 CI (Chrome for Testing 158, Terminal in native fullscreen)
+
+| Measurement in the video tab | visibility | frames/s |
+|---|---|---|
+| Tab on screen | visible | 24.9 |
+| Hidden behind fullscreen app, **no** MacPiP (the original freeze) | hidden | **0** |
+| Hidden behind fullscreen app, **MacPiP floating** | visible | **24.1** |
+
+MacPiP's window is drawn above the fullscreen Terminal, and screenshots 2 s apart show different frames.
 
 ## Install
 
-**Download:** [`dist/MacPiP.dmg`](dist/MacPiP.dmg): universal (Apple Silicon + Intel), macOS 12.3+, 128 KB. SHA-256 in [`dist/SHA256`](dist/SHA256).
+**Download:** [`dist/MacPiP.dmg`](dist/MacPiP.dmg): universal (Apple Silicon + Intel), macOS 12.3+. SHA-256 in [`dist/SHA256`](dist/SHA256).
 
-1. Open the DMG and drag **MacPiP** to **Applications**.
-2. First launch: the app is ad-hoc signed, not notarized, so macOS blocks it. Go to System Settings ▸ Privacy & Security ▸ **Open Anyway**. Or run:
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/MacPiP.app
-   ```
-3. Allow **Accessibility** (to resize the front window). The first fill asks to control **System Events** (menu bar / Dock auto-hide); allow it.
+1. Drag **MacPiP** to **Applications**, then open it. It isn't notarized, so the first time use System Settings ▸ Privacy & Security ▸ **Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/MacPiP.app`.
+2. MacPiP links itself to your Chromium browsers and shows the extension folder.
+3. In the browser: `chrome://extensions` → **Developer mode** → **Load unpacked** → choose that folder (one time).
 
-**From source:** `./install.sh` (needs Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
+From source: `./install.sh` (Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 
 ## Use
 
 | Action | How |
 |---|---|
-| Start PiP | in your browser as usual (PiP button, right-click ▸ Picture in Picture, Chrome auto-PiP) |
-| Fill screen / restore | **⌃⌥⌘F** in any app, or menu bar ▸ Fill Screen with Front Window |
-| Window already in native fullscreen | ⌃⌥⌘F takes it out of native fullscreen and fills the screen instead |
-| Keep menu bar & Dock visible | menu bar ▸ untick Hide Menu Bar & Dock While Filled |
-| Auto-start | menu bar ▸ Launch at Login (macOS 13+) |
+| Float the video in this tab | toolbar button or **⌥⇧P** (again to stop) |
+| Play / pause | click the PiP, or Space |
+| Seek ±10 s / mute | hover controls, or ← → / M |
+| Move / resize | drag anywhere / edges (aspect locked) |
+| Opacity, click-through, snap to corner | hover ◐, or menu bar ▸ MacPiP |
+| Close | Esc, ✕, or stop from the toolbar |
 
-Your menu bar / Dock auto-hide settings come back on restore, on quit, if the filled app quits, and on next launch after a crash.
+## Trade-offs
 
-## Verified on macOS 26 CI
-
-Chrome's native PiP + Terminal: ⌃⌥⌘F → Terminal fills the screen, menu bar and Dock hidden, PiP on top and still playing (two screenshots 2 s apart differ) → ⌃⌥⌘F → original size and auto-hide settings restored. Starting from native fullscreen also works.
-
-## Privacy
-
-No network, no extension, no screen capture, no telemetry, no logs. Stores 2 preferences (and your previous auto-hide values while a window is filled). ~260 lines of Swift.
-
-## Limits
-
-- Not a macOS fullscreen Space: no swipe-to-Space, and the window keeps its title bar.
-- Apps with a maximum window size can't fill the screen.
-- Rebuilding / re-downloading resets the Accessibility permission (ad-hoc signature).
+- **Privacy:** while floating, the extension reads the video in that one tab and holds a tab capture (Chrome shows its "being shared" indicator). Nothing leaves your Mac: frames go only to MacPiP over local native messaging. No network, no logs.
+- **DRM** (Netflix, Disney+…): protected frames can't be read, so the video can't be floated.
+- The tab must stay open (it can be in the background, minimized, or behind fullscreen apps).
+- Cross-origin video without CORS falls back to cropping the tab capture (lower quality, follows the on-page player). This fallback hasn't been tested.
+- Firefox / Safari: not supported (Safari's own PiP already floats over fullscreen apps).
 
 ## Uninstall
 

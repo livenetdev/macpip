@@ -1,4 +1,4 @@
-// Shared by content.js and offscreen.js: hardware H.264 via WebCodecs → JSON-safe messages.
+// Shared by content.js and offscreen.js: H.264 via WebCodecs (hardware, software fallback) → JSON-safe messages.
 // Messages: {k:'cfg', w, h, avcc}  (before the first frame and on every size change)
 //           {k:'f', key, d}         (one access unit, AVCC length-prefixed, base64)
 globalThis.MacPiPEncoder ??= class {
@@ -24,7 +24,7 @@ globalThis.MacPiPEncoder ??= class {
       w = Math.max(2, Math.round((w * s) / 2) * 2);
       h = Math.max(2, Math.round((h * s) / 2) * 2);
       if (!this.enc || this.enc.state !== 'configured' || w !== this.w || h !== this.h) this.configure(w, h);
-      if (this.enc.encodeQueueSize > 2) return; // behind: drop, never queue latency
+      if (!this.enc || this.enc.encodeQueueSize > 2) return; // failed (retrying) or behind: drop, never queue latency
       this.enc.encode(frame, { keyFrame: this.wantKey || this.n++ % 180 === 0 });
       this.wantKey = false;
     } catch (e) {
