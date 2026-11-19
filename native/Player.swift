@@ -68,6 +68,9 @@ final class Player: NSPanel, NSWindowDelegate {
         stats.backgroundColor = NSColor.black.withAlphaComponent(0.55)
         stats.drawsBackground = true
         stats.isHidden = true
+        stats.lineBreakMode = .byTruncatingTail
+        stats.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) // never widen the window
+        stats.setContentHuggingPriority(.defaultLow, for: .horizontal)
         stats.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stats)
         NSLayoutConstraint.activate([
