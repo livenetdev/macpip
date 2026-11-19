@@ -51,7 +51,8 @@ From source: `./install.sh` (Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 | Controls | appear on hover, fade after 2.5 s without mouse movement |
 | Move / resize | drag anywhere / edges (aspect locked) |
 | Opacity | ◐ slider bottom-right, or in menu bar ▸ MacPiP |
-| Click-through, snap to corner, close all | menu bar ▸ MacPiP (acts on the window you last hovered) |
+| Click-through | ✋ (top-right): clicks go to the app underneath. Hover + hold **⌥** to interact again (or click ✋ to turn off) |
+| Snap to corner, close all | menu bar ▸ MacPiP (acts on the window you last hovered) |
 | Close | ✕ (top-right), Esc, or stop from the toolbar |
 | Diagnose stutter | menu bar ▸ MacPiP ▸ **Show Frame Rate**: tab → encoded (dropped) → sent → shown fps |
 

@@ -132,7 +132,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         opacity.view = row
         menu.addItem(opacity)
 
-        menu.addItem(item("Click-through", #selector(toggleGhost), on: p.ignoresMouseEvents))
+        menu.addItem(item("Click-through (hold ⌥ over it to interact)", #selector(toggleGhost), on: p.clickThrough))
         let mv = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
         let mvMenu = NSMenu()
         for (i, name) in ["Top Left", "Top Right", "Bottom Left", "Bottom Right"].enumerated() {
@@ -157,7 +157,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var target: Player? { active ?? players.values.first }
     @objc private func opacitySlid(_ s: NSSlider) { target?.setOpacity(CGFloat(s.doubleValue)) }
-    @objc private func toggleGhost() { if let t = target { t.ignoresMouseEvents.toggle() } }
+    @objc private func toggleGhost() { if let t = target { t.clickThrough.toggle() } }
     @objc private func snap(_ s: NSMenuItem) { target?.snap(s.tag) }
     @objc private func closeActive() { target?.close() }
     @objc private func closeAll() { Array(players.values).forEach { $0.close() } }

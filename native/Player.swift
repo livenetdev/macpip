@@ -16,6 +16,46 @@ final class Player: NSPanel, NSWindowDelegate {
     private let bar = Controls()
     private var hideWork: DispatchWorkItem?
     private var pinControls = false // CI screenshots (SIGUSR1)
+    private let hint = NSTextField(labelWithString: "Hold ⌥ to interact")
+    private var peekTimer: Timer?
+    private var peeking = false
+
+    /// Click-through: the window ignores the mouse so clicks reach the app underneath.
+    /// Holding ⌥ while the cursor is over the window makes it interactive again (polled: no permissions needed).
+    var clickThrough = false {
+        didSet {
+            guard clickThrough != oldValue else { return }
+            bar.setClickThrough(clickThrough)
+            peeking = false
+            ignoresMouseEvents = clickThrough
+            peekTimer?.invalidate()
+            peekTimer = nil
+            if clickThrough {
+                showControls(false)
+                let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.peek() }
+                RunLoop.main.add(t, forMode: .common)
+                peekTimer = t
+            } else {
+                setHint(false)
+                showControls(frame.contains(NSEvent.mouseLocation))
+            }
+        }
+    }
+
+    private func peek() {
+        let inside = frame.contains(NSEvent.mouseLocation)
+        let wantsPeek = inside && NSEvent.modifierFlags.contains(.option)
+        setHint(inside && !wantsPeek)
+        guard wantsPeek != peeking else { return }
+        peeking = wantsPeek
+        ignoresMouseEvents = !wantsPeek
+        showControls(wantsPeek)
+    }
+
+    private func setHint(_ on: Bool) {
+        guard (hint.alphaValue > 0) != on else { return }
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; hint.animator().alphaValue = on ? 1 : 0 }
+    }
     private let stats = NSTextField(labelWithString: "")
     private var shown = 0
     private var keyMonitor: Any?
@@ -69,6 +109,7 @@ final class Player: NSPanel, NSWindowDelegate {
             guard let self else { return }
             switch c {
             case "close": self.close()
+            case "ghost": self.clickThrough.toggle()
             default: self.onCommand?(c == "back" ? ["cmd": "seek", "d": -10] : c == "fwd" ? ["cmd": "seek", "d": 10] : ["cmd": c])
             }
         }
@@ -88,6 +129,22 @@ final class Player: NSPanel, NSWindowDelegate {
             stats.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
             stats.topAnchor.constraint(equalTo: root.topAnchor, constant: 34), // below the title row
             stats.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -6),
+        ])
+
+        hint.font = .systemFont(ofSize: 11, weight: .semibold)
+        hint.textColor = .white
+        hint.alignment = .center
+        hint.wantsLayer = true
+        hint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        hint.layer?.cornerRadius = 9
+        hint.alphaValue = 0
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(hint)
+        NSLayoutConstraint.activate([
+            hint.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            hint.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            hint.widthAnchor.constraint(equalToConstant: 132),
+            hint.heightAnchor.constraint(equalToConstant: 18),
         ])
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
@@ -287,6 +344,7 @@ final class Player: NSPanel, NSWindowDelegate {
         closing = true
         saveFrame()
         if let m = keyMonitor { NSEvent.removeMonitor(m) }
+        peekTimer?.invalidate()
         super.close()
         onClose?()
     }
@@ -348,6 +406,7 @@ final class Controls: NSView {
     private let bottom = CAGradientLayer()
     private var play: NSButton!
     private var mute: NSButton!
+    private var ghost: NSButton!
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -364,6 +423,7 @@ final class Controls: NSView {
                                          icon("goforward.10", 18, "Forward 10 s (→)", "fwd")])
         center.spacing = 26
         let close = icon("xmark", 12, "Close (Esc)", "close")
+        ghost = icon("hand.raised.slash", 12, "Click-through: clicks go to the app underneath (hold ⌥ to interact)", "ghost")
         let dim = NSImageView(image: symbol("circle.lefthalf.filled", 12))
         dim.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         dim.toolTip = "Opacity"
@@ -386,14 +446,16 @@ final class Controls: NSView {
         opacity.onChange = { [weak self] v in self?.onOpacity?(v) }
         opacity.toolTip = "Opacity"
 
-        for v in [titleLabel, close, center, elapsed, timeline, total, mute, dim, opacity] as [NSView] {
+        for v in [titleLabel, ghost, close, center, elapsed, timeline, total, mute, dim, opacity] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
         let row = bottomAnchor
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: close.leadingAnchor, constant: -10),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: ghost.leadingAnchor, constant: -10),
+            ghost.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -14),
+            ghost.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 16),
             close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             close.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
@@ -438,6 +500,10 @@ final class Controls: NSView {
 
     func setTitle(_ t: String) { titleLabel.stringValue = t }
     func setOpacity(_ a: CGFloat) { opacity.value = Double(a) }
+    func setClickThrough(_ on: Bool) {
+        ghost.image = symbol(on ? "hand.raised.slash.fill" : "hand.raised.slash", 12)
+        ghost.contentTintColor = on ? .controlAccentColor : .white
+    }
     func setState(paused: Bool, muted: Bool) {
         play.image = symbol(paused ? "play.fill" : "pause.fill", 26)
         mute.image = symbol(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 13)
