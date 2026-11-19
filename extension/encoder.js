@@ -9,6 +9,13 @@ globalThis.MacPiPEncoder ??= class {
     this.w = this.h = this.n = 0;
     this.wantKey = true;
     this.stats = { enc: 0, drop: 0, out: 0, bytes: 0 };
+    this.maxW = 1280; this.maxH = 720; // replaced by the PiP window's pixel size once MacPiP reports it
+  }
+
+  // Encode at the size the PiP window actually shows (≥ 640×360, ≤ 1080p): less work, no drops.
+  setMax(w, h) {
+    this.maxW = Math.min(1920, Math.max(640, w | 0));
+    this.maxH = Math.min(1080, Math.max(360, h | 0));
   }
 
   static b64(u8) {
@@ -22,7 +29,7 @@ globalThis.MacPiPEncoder ??= class {
   encode(frame) {
     try {
       let w = frame.displayWidth, h = frame.displayHeight;
-      const s = Math.min(1, 1920 / w, 1080 / h); // cap at 1080p: plenty for a PiP, cheap to encode
+      const s = Math.min(1, this.maxW / w, this.maxH / h);
       w = Math.max(2, Math.round((w * s) / 2) * 2);
       h = Math.max(2, Math.round((h * s) / 2) * 2);
       if (!this.enc || this.enc.state !== 'configured' || w !== this.w || h !== this.h) this.configure(w, h);

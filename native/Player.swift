@@ -105,6 +105,14 @@ final class Player: NSPanel, NSWindowDelegate {
         format = fd
         setAspect(CGSize(width: width, height: height))
         if !isVisible { orderFrontRegardless() }
+        if !sentSize { sentSize = true; reportSize() }
+    }
+
+    private var sentSize = false
+    /// Tell the encoder the window's pixel size so it never encodes more than is shown.
+    private func reportSize() {
+        let px = convertToBacking(contentRect(forFrameRect: frame))
+        onCommand?(["cmd": "size", "w": Int(px.width), "h": Int(px.height)])
     }
 
     func enqueue(_ data: Data, key: Bool) {
@@ -223,7 +231,7 @@ final class Player: NSPanel, NSWindowDelegate {
 
     private func saveFrame() { defaults.set(NSStringFromRect(frame), forKey: "frame") }
     func windowDidMove(_ n: Notification) { saveFrame() }
-    func windowDidEndLiveResize(_ n: Notification) { saveFrame() }
+    func windowDidEndLiveResize(_ n: Notification) { saveFrame(); reportSize() }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }

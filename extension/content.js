@@ -53,6 +53,7 @@
     else if (m.cmd === 'seek') v.currentTime = Math.max(0, v.currentTime + m.d);
     else if (m.cmd === 'mute') v.muted = !v.muted;
     else if (m.cmd === 'key') enc.key();
+    else if (m.cmd === 'size') enc.setMax(m.w, m.h);
     else if (m.cmd === 'stop') stop();
   });
   port.onDisconnect.addListener(() => stop());
