@@ -20,15 +20,14 @@ your tab (Chrome, Brave, Edge, Arc, Vivaldi)          MacPiP.app
 | Fill the screen on the same Space | not real fullscreen | ✓ | not a fullscreen Space |
 | **Stream the tab's video to MacPiP** | ✓ | ✓ | needs an extension + app |
 
-## Verified on macOS 26 CI (Chrome for Testing 158, Terminal in native fullscreen)
+## Verified on macOS 26 CI (Chrome for Testing 158, 1080p Big Buck Bunny, Terminal in native fullscreen)
 
-| Measurement in the video tab | visibility | frames/s |
+| Video tab while hidden behind a fullscreen app | visibility | frames/s |
 |---|---|---|
-| Tab on screen | visible | 24.9 |
-| Hidden behind fullscreen app, **no** MacPiP (the original freeze) | hidden | **0** |
-| Hidden behind fullscreen app, **MacPiP floating** | visible | **24.1** |
+| **No** MacPiP (the original freeze) | hidden | **0** |
+| **MacPiP floating** | visible | **~56** |
 
-MacPiP's window is drawn above the fullscreen Terminal, and screenshots 2 s apart show different frames.
+Per-second pipeline while hidden: tab ~55 → encoded ~55 (0 dropped) → shown ~55 fps, ~1.8 Mbps. That's on CI's *software* encoder; real Macs use the hardware encoder. MacPiP's window is drawn above the fullscreen Terminal and stays live.
 
 ## Install
 
@@ -50,6 +49,7 @@ From source: `./install.sh` (Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 | Move / resize | drag anywhere / edges (aspect locked) |
 | Opacity, click-through, snap to corner | hover ◐, or menu bar ▸ MacPiP |
 | Close | Esc, ✕, or stop from the toolbar |
+| Diagnose stutter | menu bar ▸ MacPiP ▸ **Show Frame Rate**: tab → encoded (dropped) → sent → shown fps |
 
 ## Trade-offs
 
