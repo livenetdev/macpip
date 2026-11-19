@@ -13,7 +13,9 @@ final class Player: NSPanel, NSWindowDelegate {
     private var format: CMVideoFormatDescription?
     private var aspect = CGSize(width: 16, height: 9)
     private let root = HoverView()
-    private let bar = Bar()
+    private let bar = Controls()
+    private var hideWork: DispatchWorkItem?
+    private let pinControls = ProcessInfo.processInfo.environment["MACPIP_SHOW_CONTROLS"] != nil // CI screenshots
     private let stats = NSTextField(labelWithString: "")
     private var shown = 0
     private var keyMonitor: Any?
@@ -48,13 +50,17 @@ final class Player: NSPanel, NSWindowDelegate {
         root.onHover = { [weak self] inside in
             guard let self, !self.ignoresMouseEvents else { return }
             if inside { self.onActivate?() }
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.bar.animator().alphaValue = inside ? 1 : 0 }
+            self.showControls(inside)
+        }
+        root.onMove = { [weak self] in
+            guard let self, !self.ignoresMouseEvents else { return }
+            self.showControls(true)
         }
         root.onClick = { [weak self] in self?.onCommand?(["cmd": "toggle"]) }
         contentView = root
 
-        bar.frame = NSRect(x: 0, y: 0, width: root.bounds.width, height: Bar.height)
-        bar.autoresizingMask = [.width, .maxYMargin]
+        bar.frame = root.bounds
+        bar.autoresizingMask = [.width, .height]
         bar.alphaValue = 0
         bar.setOpacity(alphaValue)
         bar.onOpacity = { [weak self] a in self?.setOpacity(CGFloat(a)) }
@@ -67,7 +73,7 @@ final class Player: NSPanel, NSWindowDelegate {
             }
         }
         root.addSubview(bar)
-        if ProcessInfo.processInfo.environment["MACPIP_SHOW_CONTROLS"] != nil { bar.alphaValue = 1 } // CI screenshots
+        if pinControls { bar.alphaValue = 1 }
 
         stats.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         stats.textColor = .white
@@ -81,7 +87,7 @@ final class Player: NSPanel, NSWindowDelegate {
         root.addSubview(stats)
         NSLayoutConstraint.activate([
             stats.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
-            stats.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
+            stats.topAnchor.constraint(equalTo: root.topAnchor, constant: 34), // below the title row
             stats.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -6),
         ])
 
@@ -105,6 +111,24 @@ final class Player: NSPanel, NSWindowDelegate {
     // MARK: Stream
 
     func setTitle(_ t: String) { title = t; bar.setTitle(t) }
+
+    /// Controls fade in on hover/mouse movement and out after 2.5 s of stillness (cursor hides too).
+    private func showControls(_ on: Bool) {
+        hideWork?.cancel()
+        guard !pinControls else { return }
+        if bar.alphaValue < 1 || !on {
+            NSAnimationContext.runAnimationGroup { $0.duration = on ? 0.12 : 0.25; bar.animator().alphaValue = on ? 1 : 0 }
+        }
+        guard on else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.bar.isInteracting { return self.showControls(true) }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.25; self.bar.animator().alphaValue = 0 }
+            if self.frame.contains(NSEvent.mouseLocation) { NSCursor.setHiddenUntilMouseMoves(true) }
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
 
     func configure(width: Int, height: Int, avcc: Data) {
         var fd: CMVideoFormatDescription?
@@ -267,17 +291,19 @@ final class Player: NSPanel, NSWindowDelegate {
 final class HoverView: NSView {
     var onHover: ((Bool) -> Void)?
     var onClick: (() -> Void)?
+    var onMove: (() -> Void)?
     private var start: (mouse: NSPoint, origin: NSPoint)?
     private var dragged = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
     override func mouseEntered(with e: NSEvent) { onHover?(true) }
     override func mouseExited(with e: NSEvent) { onHover?(false) }
+    override func mouseMoved(with e: NSEvent) { onMove?() }
     override func mouseDown(with e: NSEvent) {
         start = (NSEvent.mouseLocation, window?.frame.origin ?? .zero)
         dragged = false
@@ -296,103 +322,128 @@ final class HoverView: NSView {
     override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
 }
 
-/// Hover controls: timeline row above a button row.
-final class Bar: NSView {
-    static let height: CGFloat = 60
+/// Hover overlay, laid out like the browsers' own PiP:
+///   top:    title …………………………………… ✕
+///   center:        ⟲10   ▶︎   ⟳10
+///   bottom: 0:08 ━━━━━━●────── 3:45   🔈  ◐ ━━
+/// Clicks on empty areas fall through to the window (drag to move, click to play/pause).
+final class Controls: NSView {
     var onCommand: ((String) -> Void)?
     var onSeek: ((Double) -> Void)?
     var onOpacity: ((Double) -> Void)?
-    private let label = NSTextField(labelWithString: "")
+    var isInteracting: Bool { timeline.isDragging || opacity.isDragging }
+
+    private let titleLabel = NSTextField(labelWithString: "")
     private let elapsed = NSTextField(labelWithString: "0:00")
     private let total = NSTextField(labelWithString: "0:00")
-    private let timeline = ScrubSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
-    private let opacity = NSSlider(value: 1, minValue: 0.2, maxValue: 1, target: nil, action: nil)
-    private var playButton: NSButton!
-    private var muteButton: NSButton!
-    private var duration = 0.0
+    private let timeline = ThinSlider()
+    private let opacity = ThinSlider()
+    private let top = CAGradientLayer()
+    private let bottom = CAGradientLayer()
+    private var play: NSButton!
+    private var mute: NSButton!
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        appearance = NSAppearance(named: .darkAqua)
-        playButton = button("pause.fill", "Play/Pause (Space)", "toggle")
-        muteButton = button("speaker.wave.2.fill", "Mute (M)", "mute")
-        let left = NSStackView(views: [button("gobackward.10", "Back 10 s (←)", "back"), playButton,
-                                       button("goforward.10", "Forward 10 s (→)", "fwd"), muteButton])
-        let dim = NSImageView(image: NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: "Opacity") ?? NSImage())
-        dim.contentTintColor = .white
-        let right = NSStackView(views: [dim, opacity, button("xmark", "Close (Esc)", "close")])
-        left.spacing = 10; right.spacing = 6
+        for (g, flip) in [(top, true), (bottom, false)] {
+            let dark = NSColor.black.withAlphaComponent(0.6).cgColor, clear = NSColor.black.withAlphaComponent(0).cgColor
+            g.colors = flip ? [clear, dark] : [dark, clear] // layer y grows upward
+            layer?.addSublayer(g)
+        }
 
-        for l in [label, elapsed, total] {
+        play = icon("pause.fill", 26, "Play/Pause (Space)", "toggle")
+        mute = icon("speaker.wave.2.fill", 13, "Mute (M)", "mute")
+        let center = NSStackView(views: [icon("gobackward.10", 18, "Back 10 s (←)", "back"), play,
+                                         icon("goforward.10", 18, "Forward 10 s (→)", "fwd")])
+        center.spacing = 26
+        let close = icon("xmark", 12, "Close (Esc)", "close")
+        let dim = NSImageView(image: symbol("circle.lefthalf.filled", 12))
+        dim.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        dim.toolTip = "Opacity"
+
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        for l in [titleLabel, elapsed, total] {
             l.textColor = .white
             l.lineBreakMode = .byTruncatingTail
+            l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
-        label.font = .systemFont(ofSize: 11, weight: .medium)
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for l in [elapsed, total] { l.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium) }
+        for l in [elapsed, total] {
+            l.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+            l.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
 
-        timeline.controlSize = .small
-        timeline.isContinuous = true
-        timeline.target = self
-        timeline.action = #selector(scrubbing)
-        timeline.toolTip = "Seek"
-        timeline.onRelease = { [weak self] v in self?.onSeek?(v) }
-        timeline.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        opacity.controlSize = .mini
-        opacity.isContinuous = true
-        opacity.target = self
-        opacity.action = #selector(opacityChanged)
+        timeline.onChange = { [weak self] v in self?.elapsed.stringValue = Self.format(v) }
+        timeline.onCommit = { [weak self] v in self?.onSeek?(v) }
+        opacity.minValue = 0.2
+        opacity.value = 1
+        opacity.onChange = { [weak self] v in self?.onOpacity?(v) }
         opacity.toolTip = "Opacity"
 
-        for v in [left, label, right, elapsed, timeline, total] as [NSView] {
+        for v in [titleLabel, close, center, elapsed, timeline, total, mute, dim, opacity] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
+        let row = bottomAnchor
         NSLayoutConstraint.activate([
-            // Row 1: 0:12 ━━━━━●──── 3:45
-            elapsed.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            elapsed.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -42),
-            timeline.leadingAnchor.constraint(equalTo: elapsed.trailingAnchor, constant: 6),
-            timeline.trailingAnchor.constraint(equalTo: total.leadingAnchor, constant: -6),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: close.leadingAnchor, constant: -10),
+            titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 16),
+            close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            close.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            center.centerXAnchor.constraint(equalTo: centerXAnchor),
+            center.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            elapsed.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            elapsed.centerYAnchor.constraint(equalTo: row, constant: -16),
+            timeline.leadingAnchor.constraint(equalTo: elapsed.trailingAnchor, constant: 8),
             timeline.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
-            total.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            timeline.heightAnchor.constraint(equalToConstant: 16),
+            total.leadingAnchor.constraint(equalTo: timeline.trailingAnchor, constant: 8),
             total.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
-            // Row 2: ⟲ ▶ ⟳ 🔈  title …  ◐ ━━ ✕
-            left.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            left.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            label.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 10),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: right.leadingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: left.centerYAnchor),
-            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            right.centerYAnchor.constraint(equalTo: left.centerYAnchor),
-            opacity.widthAnchor.constraint(equalToConstant: 64),
+            mute.leadingAnchor.constraint(equalTo: total.trailingAnchor, constant: 12),
+            mute.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
+            dim.leadingAnchor.constraint(equalTo: mute.trailingAnchor, constant: 12),
+            dim.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
+            opacity.leadingAnchor.constraint(equalTo: dim.trailingAnchor, constant: 6),
+            opacity.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            opacity.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
+            opacity.widthAnchor.constraint(equalToConstant: 48),
+            opacity.heightAnchor.constraint(equalToConstant: 16),
         ])
         setTime(0, duration: 0)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    override func makeBackingLayer() -> CALayer {
-        let g = CAGradientLayer()
-        g.colors = [NSColor.black.withAlphaComponent(0.75).cgColor, NSColor.black.withAlphaComponent(0).cgColor]
-        return g
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        top.frame = NSRect(x: 0, y: bounds.height - 44, width: bounds.width, height: 44)
+        bottom.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 52)
+        CATransaction.commit()
     }
 
-    func setTitle(_ t: String) { label.stringValue = t }
-    func setOpacity(_ a: CGFloat) { opacity.doubleValue = Double(a) }
+    /// Only buttons and sliders take clicks; everything else falls through to the window.
+    override func hitTest(_ p: NSPoint) -> NSView? {
+        let v = super.hitTest(p)
+        return v is NSButton || v is ThinSlider ? v : nil
+    }
+
+    func setTitle(_ t: String) { titleLabel.stringValue = t }
+    func setOpacity(_ a: CGFloat) { opacity.value = Double(a) }
     func setState(paused: Bool, muted: Bool) {
-        playButton.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill", accessibilityDescription: nil)
-        muteButton.image = NSImage(systemSymbolName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill", accessibilityDescription: nil)
+        play.image = symbol(paused ? "play.fill" : "pause.fill", 26)
+        mute.image = symbol(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 13)
     }
 
     /// duration 0 = live stream: no timeline.
     func setTime(_ t: Double, duration d: Double) {
         let live = !(d > 0)
         for v in [elapsed, timeline, total] as [NSView] { v.isHidden = live }
-        guard !live, !timeline.isScrubbing else { return }
-        duration = d
+        guard !live, !timeline.isDragging else { return }
         timeline.maxValue = d
-        timeline.doubleValue = min(max(t, 0), d)
+        timeline.value = min(max(t, 0), d)
         elapsed.stringValue = Self.format(t)
         total.stringValue = Self.format(d)
     }
@@ -402,33 +453,71 @@ final class Bar: NSView {
         return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
     }
 
-    @objc private func scrubbing() { elapsed.stringValue = Self.format(timeline.doubleValue) }
-    @objc private func opacityChanged() { onOpacity?(opacity.doubleValue) }
+    private func symbol(_ name: String, _ size: CGFloat) -> NSImage {
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+        return img.withSymbolConfiguration(.init(pointSize: size, weight: .semibold)) ?? img
+    }
 
-    private func button(_ symbol: String, _ tip: String, _ cmd: String) -> NSButton {
-        let b = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tip) ?? NSImage(),
-                         target: self, action: #selector(tapped(_:)))
+    private func icon(_ name: String, _ size: CGFloat, _ tip: String, _ cmd: String) -> NSButton {
+        let b = NSButton(image: symbol(name, size), target: self, action: #selector(tapped(_:)))
         b.identifier = NSUserInterfaceItemIdentifier(cmd)
         b.isBordered = false
         b.contentTintColor = .white
         b.toolTip = tip
+        let sh = NSShadow()
+        sh.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        sh.shadowBlurRadius = 4
+        b.shadow = sh
         return b
     }
     @objc private func tapped(_ b: NSButton) { onCommand?(b.identifier?.rawValue ?? "") }
-
-    override func mouseDown(with e: NSEvent) { window?.performDrag(with: e) }
-    override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
 }
 
-/// Timeline slider that seeks once, on release, and ignores position updates while dragged.
-final class ScrubSlider: NSSlider {
-    var onRelease: ((Double) -> Void)?
-    private(set) var isScrubbing = false
-    override func mouseDown(with e: NSEvent) {
-        isScrubbing = true
-        super.mouseDown(with: e) // runs the drag loop until mouse-up
-        isScrubbing = false
-        onRelease?(doubleValue)
+/// Minimal slider: 3 pt track that thickens with a knob on hover. onChange while dragging, onCommit on release.
+final class ThinSlider: NSView {
+    var minValue = 0.0, maxValue = 1.0
+    var value = 0.0 { didSet { needsDisplay = true } }
+    var onChange: ((Double) -> Void)?
+    var onCommit: ((Double) -> Void)?
+    private(set) var isDragging = false
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
     }
+    override func mouseEntered(with e: NSEvent) { hovering = true }
+    override func mouseExited(with e: NSEvent) { hovering = false }
     override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    private var fraction: CGFloat {
+        maxValue > minValue ? CGFloat(min(max((value - minValue) / (maxValue - minValue), 0), 1)) : 0
+    }
+
+    override func draw(_ dirty: NSRect) {
+        let active = hovering || isDragging
+        let h: CGFloat = active ? 5 : 3, r: CGFloat = 6
+        let track = NSRect(x: r, y: bounds.midY - h / 2, width: max(0, bounds.width - 2 * r), height: h)
+        NSColor.white.withAlphaComponent(0.3).setFill()
+        NSBezierPath(roundedRect: track, xRadius: h / 2, yRadius: h / 2).fill()
+        var fill = track
+        fill.size.width = track.width * fraction
+        NSColor.white.setFill()
+        NSBezierPath(roundedRect: fill, xRadius: h / 2, yRadius: h / 2).fill()
+        if active {
+            NSBezierPath(ovalIn: NSRect(x: fill.maxX - r, y: bounds.midY - r, width: 2 * r, height: 2 * r)).fill()
+        }
+    }
+
+    private func set(from e: NSEvent) {
+        let x = convert(e.locationInWindow, from: nil).x
+        let f = min(max((x - 6) / max(1, bounds.width - 12), 0), 1)
+        value = minValue + Double(f) * (maxValue - minValue)
+        onChange?(value)
+    }
+    override func mouseDown(with e: NSEvent) { isDragging = true; set(from: e) }
+    override func mouseDragged(with e: NSEvent) { set(from: e) }
+    override func mouseUp(with e: NSEvent) { isDragging = false; needsDisplay = true; onCommit?(value) }
 }
