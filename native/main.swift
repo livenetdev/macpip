@@ -16,9 +16,10 @@ func log(_ s: String) {
     }
 }
 
-final class App: NSObject, NSApplicationDelegate {
+final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var host: NativeHost?
-    private var player: Player?
+    private var players: [Int: Player] = [:]   // one window per floated tab (key = tab id)
+    private weak var active: Player?           // last hovered/created: target of the menu bar commands
     private var status: NSStatusItem?
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -35,105 +36,128 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
 
-    private var counts: [String: Int] = [:]
-
     private func handle(_ m: [String: Any]) {
         let k = m["k"] as? String ?? "?"
-        counts[k, default: 0] += 1
-        if k != "f" && k != "stats" { log("recv \(k) #\(counts[k]!)") }
+        let s = (m["s"] as? NSNumber)?.intValue ?? 0
+        if k != "f" && k != "stats" && k != "time" { log("recv \(k) s=\(s)") }
         switch k {
         case "hello":
-            let p = ensurePlayer()
+            let p = player(s)
             p.setTitle(m["title"] as? String ?? "")
             p.orderFrontRegardless()
         case "cfg":
             guard let w = m["w"] as? Int, let h = m["h"] as? Int,
-                  let s = m["avcc"] as? String, let avcc = Data(base64Encoded: s) else { return }
-            ensurePlayer().configure(width: w, height: h, avcc: avcc)
+                  let b = m["avcc"] as? String, let avcc = Data(base64Encoded: b) else { return }
+            player(s).configure(width: w, height: h, avcc: avcc)
         case "f":
-            guard let s = m["d"] as? String, let d = Data(base64Encoded: s) else { return }
-            player?.enqueue(d, key: m["key"] as? Bool ?? false)
+            guard let b = m["d"] as? String, let d = Data(base64Encoded: b) else { return }
+            players[s]?.enqueue(d, key: m["key"] as? Bool ?? false)
         case "state":
-            player?.setState(paused: m["paused"] as? Bool ?? false, muted: m["muted"] as? Bool ?? false)
+            players[s]?.setState(paused: m["paused"] as? Bool ?? false, muted: m["muted"] as? Bool ?? false)
+        case "time":
+            players[s]?.setTime((m["t"] as? NSNumber)?.doubleValue ?? 0, duration: (m["dur"] as? NSNumber)?.doubleValue ?? 0)
         case "stats":
+            guard let p = players[s] else { return }
             let n = { (key: String) in (m[key] as? NSNumber)?.intValue ?? 0 }
-            let line = "tab \(n("src")) → enc \(n("enc")) (drop \(n("drop"))) → out \(n("out")) → shown \(player?.takeShown() ?? 0) fps · \(n("kbps")) kbps · \(n("w"))×\(n("h")) · \(m["vis"] as? String ?? "")"
-            log(line)
-            player?.showStats(line)
+            let line = "tab \(n("src")) → enc \(n("enc")) (drop \(n("drop"))) → out \(n("out")) → shown \(p.takeShown()) fps · \(n("kbps")) kbps · \(n("w"))×\(n("h")) · \(m["vis"] as? String ?? "")"
+            log("[\(s)] " + line)
+            p.showStats(line)
         case "log":
             log("extension: \(m["msg"] as? String ?? "")")
-        case "bye":
-            exit(0)
+        case "end":
+            players[s]?.close() // stopped from the browser (toolbar click, tab closed)
         default:
             break
         }
     }
 
-    private func ensurePlayer() -> Player {
-        if let p = player { return p }
-        let p = Player()
-        p.onCommand = { [weak self] in self?.host?.send($0) }
-        p.onClose = { [weak self] in
-            self?.host?.send(["cmd": "stop"])
-            exit(0)
+    /// The window for tab `s`, created next to the existing ones if needed.
+    private func player(_ s: Int) -> Player {
+        if let p = players[s] { return p }
+        let p = Player(cascadeFrom: (active ?? players.values.first)?.frame)
+        p.onCommand = { [weak self] c in
+            var c = c
+            c["s"] = s
+            self?.host?.send(c)
         }
-        player = p
-        buildStatusItem()
+        p.onActivate = { [weak self, weak p] in self?.active = p }
+        p.onClose = { [weak self, weak p] in
+            guard let self else { return }
+            self.players[s] = nil
+            self.host?.send(["cmd": "stop", "s": s])
+            if self.active === p || self.active == nil { self.active = self.players.values.first }
+            if self.players.isEmpty, let st = self.status { NSStatusBar.system.removeStatusItem(st); self.status = nil }
+        }
+        players[s] = p
+        active = p
+        if status == nil { buildStatusItem() }
         return p
     }
 
-    // MARK: Menu bar item: opacity, corners, click-through (only reachable from here once enabled)
+    // MARK: Menu bar item. Acts on the window you last hovered; click-through can only be undone here.
 
     private func buildStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "pip", accessibilityDescription: "MacPiP")
         let menu = NSMenu()
-        let ghost = NSMenuItem(title: "Click-through", action: #selector(toggleGhost(_:)), keyEquivalent: "")
-        ghost.target = self
-        menu.addItem(ghost)
-        let op = NSMenuItem(title: "Opacity", action: nil, keyEquivalent: "")
-        let opMenu = NSMenu()
-        for pct in [100, 80, 60, 40, 20] {
-            let i = NSMenuItem(title: "\(pct)%", action: #selector(setOpacity(_:)), keyEquivalent: "")
-            i.target = self; i.tag = pct
-            opMenu.addItem(i)
-        }
-        op.submenu = opMenu
-        menu.addItem(op)
-        let mv = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
-        let mvMenu = NSMenu()
-        for (i, name) in ["Top Left", "Top Right", "Bottom Left", "Bottom Right"].enumerated() {
-            let c = NSMenuItem(title: name, action: #selector(snap(_:)), keyEquivalent: "")
-            c.target = self; c.tag = i
-            mvMenu.addItem(c)
-        }
-        mv.submenu = mvMenu
-        menu.addItem(mv)
-        let stats = NSMenuItem(title: "Show Frame Rate", action: #selector(toggleStats(_:)), keyEquivalent: "")
-        stats.target = self
-        stats.state = UserDefaults.standard.bool(forKey: "showStats") ? .on : .off
-        menu.addItem(stats)
-        menu.addItem(.separator())
-        let close = NSMenuItem(title: "Close", action: #selector(closePlayer), keyEquivalent: "")
-        close.target = self
-        menu.addItem(close)
+        menu.delegate = self
         item.menu = menu
         status = item
     }
 
-    @objc private func toggleGhost(_ s: NSMenuItem) {
-        guard let p = player else { return }
-        p.ignoresMouseEvents.toggle()
-        s.state = p.ignoresMouseEvents ? .on : .off
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let p = active ?? players.values.first else { return }
+        if players.count > 1 {
+            let header = NSMenuItem(title: p.title.isEmpty ? "Window" : String(p.title.prefix(40)), action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+        }
+
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
+        let label = NSTextField(labelWithString: "Opacity")
+        label.frame = NSRect(x: 20, y: 6, width: 56, height: 16)
+        let slider = NSSlider(value: Double(p.alphaValue), minValue: 0.2, maxValue: 1, target: self, action: #selector(opacitySlid(_:)))
+        slider.isContinuous = true
+        slider.frame = NSRect(x: 78, y: 4, width: 128, height: 20)
+        row.addSubview(label); row.addSubview(slider)
+        let opacity = NSMenuItem()
+        opacity.view = row
+        menu.addItem(opacity)
+
+        menu.addItem(item("Click-through", #selector(toggleGhost), on: p.ignoresMouseEvents))
+        let mv = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
+        let mvMenu = NSMenu()
+        for (i, name) in ["Top Left", "Top Right", "Bottom Left", "Bottom Right"].enumerated() {
+            let c = item(name, #selector(snap(_:)))
+            c.tag = i
+            mvMenu.addItem(c)
+        }
+        mv.submenu = mvMenu
+        menu.addItem(mv)
+        menu.addItem(item("Show Frame Rate", #selector(toggleStats), on: UserDefaults.standard.bool(forKey: "showStats")))
+        menu.addItem(.separator())
+        menu.addItem(item("Close", #selector(closeActive)))
+        if players.count > 1 { menu.addItem(item("Close All (\(players.count))", #selector(closeAll))) }
     }
-    @objc private func setOpacity(_ s: NSMenuItem) { player?.setOpacity(CGFloat(s.tag) / 100) }
-    @objc private func snap(_ s: NSMenuItem) { player?.snap(s.tag) }
-    @objc private func closePlayer() { player?.close() }
-    @objc private func toggleStats(_ s: NSMenuItem) {
+
+    private func item(_ title: String, _ action: Selector, on: Bool = false) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        i.target = self
+        i.state = on ? .on : .off
+        return i
+    }
+
+    private var target: Player? { active ?? players.values.first }
+    @objc private func opacitySlid(_ s: NSSlider) { target?.setOpacity(CGFloat(s.doubleValue)) }
+    @objc private func toggleGhost() { if let t = target { t.ignoresMouseEvents.toggle() } }
+    @objc private func snap(_ s: NSMenuItem) { target?.snap(s.tag) }
+    @objc private func closeActive() { target?.close() }
+    @objc private func closeAll() { Array(players.values).forEach { $0.close() } }
+    @objc private func toggleStats() {
         let on = !UserDefaults.standard.bool(forKey: "showStats")
         UserDefaults.standard.set(on, forKey: "showStats")
-        s.state = on ? .on : .off
-        player?.showStats(nil)
+        players.values.forEach { $0.showStats(nil) }
     }
 }
 

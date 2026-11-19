@@ -40,11 +40,21 @@ osascript -e 'tell application "System Events" to keystroke "p" using {option do
 wins; shot floating
 pgrep -fl macpip || echo "macpip not running"
 
+echo "== second window: another tab"
+URL2="https://www.w3schools.com/html/mov_bbb.mp4"
+curl -sf -X PUT "localhost:9222/json/new?$URL2" >/dev/null; sleep 5
+node ci/cdp.mjs play w3schools
+osascript -e 'tell application "Google Chrome for Testing" to activate'; sleep 2
+osascript -e 'tell application "System Events" to keystroke "p" using {option down, shift down}'; sleep 5
+wins; shot two
+
 echo "== MacPiP active, Chrome hidden behind fullscreen Terminal"
 fullscreenTerminal
-node ci/cdp.mjs measure
+node ci/cdp.mjs measure test-videos
+node ci/cdp.mjs measure w3schools
 wins; shot fs1; sleep 2; shot fs2
 sleep 4
 echo "== per-second pipeline counters (last lines are while hidden behind fullscreen Terminal)"
-grep -a "macpip: tab " /tmp/cft-out.log | tail -12 || true
+grep -a "macpip: \[" /tmp/cft-out.log | tail -12 || true
+grep -a "recv " /tmp/cft-out.log | sort | uniq -c | head
 grep -a "macpip: extension" /tmp/cft-out.log | tail -5 || true

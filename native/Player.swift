@@ -7,6 +7,7 @@ import AVFoundation
 final class Player: NSPanel, NSWindowDelegate {
     var onCommand: (([String: Any]) -> Void)?
     var onClose: (() -> Void)?
+    var onActivate: (() -> Void)?
 
     private let video = AVSampleBufferDisplayLayer()
     private var format: CMVideoFormatDescription?
@@ -19,7 +20,8 @@ final class Player: NSPanel, NSWindowDelegate {
     private var closing = false
     private let defaults = UserDefaults.standard
 
-    init() {
+    /// `cascadeFrom`: frame of an existing PiP window; the new one is placed next to it.
+    init(cascadeFrom: NSRect? = nil) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 480, height: 270),
                    styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
@@ -32,7 +34,7 @@ final class Player: NSPanel, NSWindowDelegate {
         for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { standardWindowButton(b)?.isHidden = true }
         backgroundColor = .black
         hasShadow = true
-        minSize = NSSize(width: 160, height: 90)
+        minSize = NSSize(width: 260, height: 146)
         contentAspectRatio = aspect
         alphaValue = CGFloat(defaults.object(forKey: "opacity") as? Double ?? 1)
         delegate = self
@@ -45,6 +47,7 @@ final class Player: NSPanel, NSWindowDelegate {
         root.layer?.addSublayer(video)
         root.onHover = { [weak self] inside in
             guard let self, !self.ignoresMouseEvents else { return }
+            if inside { self.onActivate?() }
             NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.bar.animator().alphaValue = inside ? 1 : 0 }
         }
         root.onClick = { [weak self] in self?.onCommand?(["cmd": "toggle"]) }
@@ -53,11 +56,13 @@ final class Player: NSPanel, NSWindowDelegate {
         bar.frame = NSRect(x: 0, y: 0, width: root.bounds.width, height: Bar.height)
         bar.autoresizingMask = [.width, .maxYMargin]
         bar.alphaValue = 0
+        bar.setOpacity(alphaValue)
+        bar.onOpacity = { [weak self] a in self?.setOpacity(CGFloat(a)) }
+        bar.onSeek = { [weak self] t in self?.onCommand?(["cmd": "seekTo", "t": t]) }
         bar.onCommand = { [weak self] c in
             guard let self else { return }
             switch c {
             case "close": self.close()
-            case "opacity": self.cycleOpacity()
             default: self.onCommand?(c == "back" ? ["cmd": "seek", "d": -10] : c == "fwd" ? ["cmd": "seek", "d": 10] : ["cmd": c])
             }
         }
@@ -91,7 +96,7 @@ final class Player: NSPanel, NSWindowDelegate {
             }
             return nil
         }
-        placeInitially()
+        placeInitially(cascadeFrom: cascadeFrom)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -134,6 +139,7 @@ final class Player: NSPanel, NSWindowDelegate {
     }
 
     func setState(paused: Bool, muted: Bool) { bar.setState(paused: paused, muted: muted) }
+    func setTime(_ t: Double, duration: Double) { bar.setTime(t, duration: duration) }
 
     private var renderStatus: AVQueuedSampleBufferRenderingStatus {
         if #available(macOS 14.0, *) { return video.sampleBufferRenderer.status }
@@ -180,9 +186,15 @@ final class Player: NSPanel, NSWindowDelegate {
         (NSScreen.screens.first { $0.visibleFrame.intersects(f) } ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? f
     }
 
-    private func placeInitially() {
+    private func placeInitially(cascadeFrom other: NSRect?) {
         var c: NSRect
-        if let s = defaults.string(forKey: "frame") {
+        if let other {
+            // Next to the existing window: above it if there is room, otherwise to its left.
+            let vis = visible(for: other)
+            c = contentRect(forFrameRect: other)
+            if other.maxY + 12 + other.height <= vis.maxY { c.origin.y = other.maxY + 12 }
+            else { c.origin.x = other.minX - 12 - other.width }
+        } else if let s = defaults.string(forKey: "frame") {
             c = contentRect(forFrameRect: NSRectFromString(s))
         } else {
             let vis = visible(for: .zero)
@@ -225,11 +237,11 @@ final class Player: NSPanel, NSWindowDelegate {
         setFrame(f, display: true, animate: true)
     }
 
-    func setOpacity(_ a: CGFloat) { alphaValue = a; defaults.set(Double(a), forKey: "opacity") }
-    private func cycleOpacity() {
-        let steps: [CGFloat] = [1, 0.75, 0.5, 0.3]
-        let i = steps.firstIndex { abs($0 - alphaValue) < 0.05 } ?? 0
-        setOpacity(steps[(i + 1) % steps.count])
+    func setOpacity(_ a: CGFloat) {
+        let a = min(1, max(0.2, a))
+        alphaValue = a
+        bar.setOpacity(a)
+        defaults.set(Double(a), forKey: "opacity") // default for new windows
     }
 
     private func saveFrame() { defaults.set(NSStringFromRect(frame), forKey: "frame") }
@@ -283,51 +295,114 @@ final class HoverView: NSView {
     override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
 }
 
+/// Hover controls: timeline row above a button row.
 final class Bar: NSView {
-    static let height: CGFloat = 34
+    static let height: CGFloat = 60
     var onCommand: ((String) -> Void)?
+    var onSeek: ((Double) -> Void)?
+    var onOpacity: ((Double) -> Void)?
     private let label = NSTextField(labelWithString: "")
+    private let elapsed = NSTextField(labelWithString: "0:00")
+    private let total = NSTextField(labelWithString: "0:00")
+    private let timeline = ScrubSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let opacity = NSSlider(value: 1, minValue: 0.2, maxValue: 1, target: nil, action: nil)
     private var playButton: NSButton!
     private var muteButton: NSButton!
+    private var duration = 0.0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
+        appearance = NSAppearance(named: .darkAqua)
         playButton = button("pause.fill", "Play/Pause (Space)", "toggle")
         muteButton = button("speaker.wave.2.fill", "Mute (M)", "mute")
         let left = NSStackView(views: [button("gobackward.10", "Back 10 s (←)", "back"), playButton,
                                        button("goforward.10", "Forward 10 s (→)", "fwd"), muteButton])
-        let right = NSStackView(views: [button("circle.lefthalf.filled", "Opacity", "opacity"),
-                                        button("xmark", "Close (Esc)", "close")])
-        label.textColor = .white
+        let dim = NSImageView(image: NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: "Opacity") ?? NSImage())
+        dim.contentTintColor = .white
+        let right = NSStackView(views: [dim, opacity, button("xmark", "Close (Esc)", "close")])
+        left.spacing = 10; right.spacing = 6
+
+        for l in [label, elapsed, total] {
+            l.textColor = .white
+            l.lineBreakMode = .byTruncatingTail
+        }
         label.font = .systemFont(ofSize: 11, weight: .medium)
-        label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for v in [left, label, right] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        left.spacing = 10; right.spacing = 8
+        for l in [elapsed, total] { l.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium) }
+
+        timeline.controlSize = .small
+        timeline.isContinuous = true
+        timeline.target = self
+        timeline.action = #selector(scrubbing)
+        timeline.toolTip = "Seek"
+        timeline.onRelease = { [weak self] v in self?.onSeek?(v) }
+        timeline.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        opacity.controlSize = .mini
+        opacity.isContinuous = true
+        opacity.target = self
+        opacity.action = #selector(opacityChanged)
+        opacity.toolTip = "Opacity"
+
+        for v in [left, label, right, elapsed, timeline, total] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
         NSLayoutConstraint.activate([
+            // Row 1: 0:12 ━━━━━●──── 3:45
+            elapsed.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            elapsed.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -42),
+            timeline.leadingAnchor.constraint(equalTo: elapsed.trailingAnchor, constant: 6),
+            timeline.trailingAnchor.constraint(equalTo: total.leadingAnchor, constant: -6),
+            timeline.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
+            total.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            total.centerYAnchor.constraint(equalTo: elapsed.centerYAnchor),
+            // Row 2: ⟲ ▶ ⟳ 🔈  title …  ◐ ━━ ✕
             left.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            left.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 12),
+            left.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+            label.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 10),
             label.trailingAnchor.constraint(lessThanOrEqualTo: right.leadingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.centerYAnchor.constraint(equalTo: left.centerYAnchor),
             right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            right.centerYAnchor.constraint(equalTo: centerYAnchor),
+            right.centerYAnchor.constraint(equalTo: left.centerYAnchor),
+            opacity.widthAnchor.constraint(equalToConstant: 64),
         ])
+        setTime(0, duration: 0)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func makeBackingLayer() -> CALayer {
         let g = CAGradientLayer()
-        g.colors = [NSColor.black.withAlphaComponent(0.65).cgColor, NSColor.black.withAlphaComponent(0).cgColor]
+        g.colors = [NSColor.black.withAlphaComponent(0.75).cgColor, NSColor.black.withAlphaComponent(0).cgColor]
         return g
     }
 
     func setTitle(_ t: String) { label.stringValue = t }
+    func setOpacity(_ a: CGFloat) { opacity.doubleValue = Double(a) }
     func setState(paused: Bool, muted: Bool) {
         playButton.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill", accessibilityDescription: nil)
         muteButton.image = NSImage(systemSymbolName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill", accessibilityDescription: nil)
     }
+
+    /// duration 0 = live stream: no timeline.
+    func setTime(_ t: Double, duration d: Double) {
+        let live = !(d > 0)
+        for v in [elapsed, timeline, total] as [NSView] { v.isHidden = live }
+        guard !live, !timeline.isScrubbing else { return }
+        duration = d
+        timeline.maxValue = d
+        timeline.doubleValue = min(max(t, 0), d)
+        elapsed.stringValue = Self.format(t)
+        total.stringValue = Self.format(d)
+    }
+
+    static func format(_ s: Double) -> String {
+        let s = Int(max(0, s.isFinite ? s : 0))
+        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    @objc private func scrubbing() { elapsed.stringValue = Self.format(timeline.doubleValue) }
+    @objc private func opacityChanged() { onOpacity?(opacity.doubleValue) }
 
     private func button(_ symbol: String, _ tip: String, _ cmd: String) -> NSButton {
         let b = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tip) ?? NSImage(),
@@ -341,5 +416,18 @@ final class Bar: NSView {
     @objc private func tapped(_ b: NSButton) { onCommand?(b.identifier?.rawValue ?? "") }
 
     override func mouseDown(with e: NSEvent) { window?.performDrag(with: e) }
+    override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
+}
+
+/// Timeline slider that seeks once, on release, and ignores position updates while dragged.
+final class ScrubSlider: NSSlider {
+    var onRelease: ((Double) -> Void)?
+    private(set) var isScrubbing = false
+    override func mouseDown(with e: NSEvent) {
+        isScrubbing = true
+        super.mouseDown(with: e) // runs the drag loop until mouse-up
+        isScrubbing = false
+        onRelease?(doubleValue)
+    }
     override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
 }

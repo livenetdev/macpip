@@ -51,6 +51,7 @@
   port.onMessage.addListener((m) => {
     if (m.cmd === 'toggle') v.paused ? v.play().catch(() => {}) : v.pause();
     else if (m.cmd === 'seek') v.currentTime = Math.max(0, v.currentTime + m.d);
+    else if (m.cmd === 'seekTo') v.currentTime = Math.max(0, m.t);
     else if (m.cmd === 'mute') v.muted = !v.muted;
     else if (m.cmd === 'key') enc.key();
     else if (m.cmd === 'size') enc.setMax(m.w, m.h);
@@ -62,6 +63,7 @@
     if (stopped) return;
     stopped = true;
     clearInterval(statsTimer);
+    clearInterval(timeTimer);
     events.forEach((e) => v.removeEventListener(e, state));
     removeEventListener('scroll', onLayout, true);
     removeEventListener('resize', onLayout);
@@ -70,6 +72,15 @@
     if (globalThis.__macpip?.stop === stop) delete globalThis.__macpip;
   }
   globalThis.__macpip = { stop };
+
+  // Timeline: position/duration 4× a second (duration 0 = live stream, no timeline).
+  let lastT = -1, lastDur = -1;
+  const timeTimer = setInterval(() => {
+    const t = Math.round(v.currentTime * 4) / 4, dur = isFinite(v.duration) ? v.duration : 0;
+    if (t === lastT && dur === lastDur) return;
+    lastT = t; lastDur = dur;
+    port.postMessage({ k: 'time', t: v.currentTime, dur });
+  }, 250);
 
   // Per-second pipeline counters (shown by MacPiP ▸ Show Frame Rate).
   const statsTimer = setInterval(() => {
