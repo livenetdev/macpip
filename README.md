@@ -46,12 +46,13 @@ From source: `./install.sh` (Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 | Float the video in this tab | toolbar button or **⌥⇧P** (again to stop) |
 | More windows | do the same on other tabs: each gets its own window, placed next to the others |
 | Seek | drag the timeline (elapsed / duration; hidden for live streams) |
-| Play / pause | click the PiP, or Space |
-| Seek ±10 s / mute | hover controls, or ← → / M |
+| Play / pause | click the video, the center ▶︎/⏸, or Space |
+| Seek ±10 s / mute | center ⟲10 ⟳10 and 🔈, or ← → / M |
+| Controls | appear on hover, fade after 2.5 s without mouse movement |
 | Move / resize | drag anywhere / edges (aspect locked) |
-| Opacity | slider in the hover bar, or in menu bar ▸ MacPiP |
+| Opacity | ◐ slider bottom-right, or in menu bar ▸ MacPiP |
 | Click-through, snap to corner, close all | menu bar ▸ MacPiP (acts on the window you last hovered) |
-| Close | Esc, ✕, or stop from the toolbar |
+| Close | ✕ (top-right), Esc, or stop from the toolbar |
 | Diagnose stutter | menu bar ▸ MacPiP ▸ **Show Frame Rate**: tab → encoded (dropped) → sent → shown fps |
 
 ## Trade-offs
