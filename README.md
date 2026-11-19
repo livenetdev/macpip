@@ -27,7 +27,7 @@ your tab (Chrome, Brave, Edge, Arc, Vivaldi)          MacPiP.app
 | **No** MacPiP (the original freeze) | hidden | **0** |
 | **MacPiP floating** | visible | **~56** |
 
-Per-second pipeline while hidden: tab ~55 → encoded ~55 (0 dropped) → shown ~55 fps, ~1.8 Mbps. That's on CI's *software* encoder; real Macs use the hardware encoder. MacPiP's window is drawn above the fullscreen Terminal and stays live.
+Per-second pipeline while hidden: tab ~55 → encoded ~55 (0 dropped) → shown ~55 fps, ~1.8 Mbps. With two windows at once: ~59 fps (1080p tab) and 25 fps (25 fps tab), 0 dropped. That's on CI's *software* encoder; real Macs use the hardware encoder. MacPiP's window is drawn above the fullscreen Terminal and stays live.
 
 ## Install
 
@@ -44,10 +44,13 @@ From source: `./install.sh` (Xcode CLT). `DMG=1 ./build.sh` rebuilds the DMG.
 | Action | How |
 |---|---|
 | Float the video in this tab | toolbar button or **⌥⇧P** (again to stop) |
+| More windows | do the same on other tabs: each gets its own window, placed next to the others |
+| Seek | drag the timeline (elapsed / duration; hidden for live streams) |
 | Play / pause | click the PiP, or Space |
 | Seek ±10 s / mute | hover controls, or ← → / M |
 | Move / resize | drag anywhere / edges (aspect locked) |
-| Opacity, click-through, snap to corner | hover ◐, or menu bar ▸ MacPiP |
+| Opacity | slider in the hover bar, or in menu bar ▸ MacPiP |
+| Click-through, snap to corner, close all | menu bar ▸ MacPiP (acts on the window you last hovered) |
 | Close | Esc, ✕, or stop from the toolbar |
 | Diagnose stutter | menu bar ▸ MacPiP ▸ **Show Frame Rate**: tab → encoded (dropped) → sent → shown fps |
 

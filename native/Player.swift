@@ -67,6 +67,7 @@ final class Player: NSPanel, NSWindowDelegate {
             }
         }
         root.addSubview(bar)
+        if ProcessInfo.processInfo.environment["MACPIP_SHOW_CONTROLS"] != nil { bar.alphaValue = 1 } // CI screenshots
 
         stats.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         stats.textColor = .white

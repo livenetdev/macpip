@@ -22,7 +22,7 @@ defaults write io.github.macpip showStats -bool true
 URL="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_5MB.mp4"
 curl -sfI "$URL" >/dev/null || URL="https://www.w3schools.com/html/mov_bbb.mp4"; echo "video: $URL"
 
-MACPIP_DEBUG=1 "$CFT" --user-data-dir="$PROFILE" --load-extension="$EXT" --disable-features=DisableLoadExtensionCommandLineSwitch \
+MACPIP_DEBUG=1 MACPIP_SHOW_CONTROLS=1 "$CFT" --user-data-dir="$PROFILE" --load-extension="$EXT" --disable-features=DisableLoadExtensionCommandLineSwitch \
   --remote-debugging-port=9222 --no-first-run --no-default-browser-check --autoplay-policy=no-user-gesture-required \
   "$URL" > /tmp/cft-out.log 2>&1 &
 for i in $(seq 40); do curl -sf localhost:9222/json >/dev/null && break; sleep 1; done; sleep 4
