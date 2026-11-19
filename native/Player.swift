@@ -15,7 +15,7 @@ final class Player: NSPanel, NSWindowDelegate {
     private let root = HoverView()
     private let bar = Controls()
     private var hideWork: DispatchWorkItem?
-    private let pinControls = ProcessInfo.processInfo.environment["MACPIP_SHOW_CONTROLS"] != nil // CI screenshots
+    private var pinControls = false // CI screenshots (SIGUSR1)
     private let stats = NSTextField(labelWithString: "")
     private var shown = 0
     private var keyMonitor: Any?
@@ -73,7 +73,6 @@ final class Player: NSPanel, NSWindowDelegate {
             }
         }
         root.addSubview(bar)
-        if pinControls { bar.alphaValue = 1 }
 
         stats.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         stats.textColor = .white
@@ -111,6 +110,13 @@ final class Player: NSPanel, NSWindowDelegate {
     // MARK: Stream
 
     func setTitle(_ t: String) { title = t; bar.setTitle(t) }
+
+    /// Keep controls visible (CI screenshots; toggled with SIGUSR1).
+    func togglePinnedControls() {
+        pinControls.toggle()
+        hideWork?.cancel()
+        bar.alphaValue = pinControls ? 1 : 0
+    }
 
     /// Controls fade in on hover/mouse movement and out after 2.5 s of stillness (cursor hides too).
     private func showControls(_ on: Bool) {

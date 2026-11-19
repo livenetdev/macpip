@@ -90,7 +90,7 @@
     frames = 0;
   }, 1000);
 
-  port.postMessage({ k: 'hello', title: document.title, w: v.videoWidth, h: v.videoHeight });
+  port.postMessage({ k: 'hello', title: document.title || location.hostname, w: v.videoWidth, h: v.videoHeight });
   state();
   grab();
 })();

@@ -21,12 +21,19 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var players: [Int: Player] = [:]   // one window per floated tab (key = tab id)
     private weak var active: Player?           // last hovered/created: target of the menu bar commands
     private var status: NSStatusItem?
+    private var usr1: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         let args = CommandLine.arguments
         if args.count > 1, args[1].hasPrefix("chrome-extension://") {
             host = NativeHost(onMessage: { [weak self] in self?.handle($0) }, onEOF: { exit(0) })
             host?.start()
+            // `kill -USR1` pins the hover controls visible (used by CI for screenshots).
+            signal(SIGUSR1, SIG_IGN)
+            let sig = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+            sig.setEventHandler { [weak self] in self?.players.values.forEach { $0.togglePinnedControls() } }
+            sig.resume()
+            usr1 = sig
         } else if let i = args.firstIndex(of: "--setup-quiet") {
             let linked = Setup.install(extraHostDirs: Array(args.dropFirst(i + 1)))
             print("linked: \(linked.joined(separator: ", "))\nextension: \(Setup.extensionDir.path)")
