@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.target !== 'offscreen') return;
   if (m.type === 'start') start(m.streamId);
   else if (m.type === 'rect') crop = m;
-  else if (m.type === 'crop') { crop = crop || {}; track?.applyConstraints({ frameRate: { max: 60 } }).catch(() => {}); }
+  else if (m.type === 'crop') { crop = crop || {}; track?.applyConstraints({ width: { max: 3840 }, height: { max: 2160 }, frameRate: { max: 60 } }).catch(() => {}); }
   else if (m.type === 'key') enc?.key();
   else if (m.type === 'stop') stop();
 });
@@ -16,7 +16,7 @@ async function start(streamId) {
   stop();
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false, // tab audio keeps playing normally
-    video: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId, maxWidth: 3840, maxHeight: 2160, maxFrameRate: 5 } }, // 5 fps: keep-alive only; raised in crop mode
+    video: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId, maxWidth: 640, maxHeight: 360, maxFrameRate: 60 } }, // small but full rate: a hidden tab only draws as often as it is captured
   });
   track = stream.getVideoTracks()[0];
   port = chrome.runtime.connect({ name: 'offscreen' });

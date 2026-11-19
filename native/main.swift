@@ -40,7 +40,7 @@ final class App: NSObject, NSApplicationDelegate {
     private func handle(_ m: [String: Any]) {
         let k = m["k"] as? String ?? "?"
         counts[k, default: 0] += 1
-        if k != "f" || counts["f"] == 1 || counts["f"]! % 120 == 0 { log("recv \(k) #\(counts[k]!)") }
+        if k != "f" && k != "stats" { log("recv \(k) #\(counts[k]!)") }
         switch k {
         case "hello":
             let p = ensurePlayer()
@@ -55,6 +55,11 @@ final class App: NSObject, NSApplicationDelegate {
             player?.enqueue(d, key: m["key"] as? Bool ?? false)
         case "state":
             player?.setState(paused: m["paused"] as? Bool ?? false, muted: m["muted"] as? Bool ?? false)
+        case "stats":
+            let n = { (key: String) in (m[key] as? NSNumber)?.intValue ?? 0 }
+            let line = "tab \(n("src")) → enc \(n("enc")) (drop \(n("drop"))) → out \(n("out")) → shown \(player?.takeShown() ?? 0) fps · \(n("kbps")) kbps · \(n("w"))×\(n("h")) · \(m["vis"] as? String ?? "")"
+            log(line)
+            player?.showStats(line)
         case "log":
             log("extension: \(m["msg"] as? String ?? "")")
         case "bye":
@@ -104,6 +109,10 @@ final class App: NSObject, NSApplicationDelegate {
         }
         mv.submenu = mvMenu
         menu.addItem(mv)
+        let stats = NSMenuItem(title: "Show Frame Rate", action: #selector(toggleStats(_:)), keyEquivalent: "")
+        stats.target = self
+        stats.state = UserDefaults.standard.bool(forKey: "showStats") ? .on : .off
+        menu.addItem(stats)
         menu.addItem(.separator())
         let close = NSMenuItem(title: "Close", action: #selector(closePlayer), keyEquivalent: "")
         close.target = self
@@ -120,6 +129,12 @@ final class App: NSObject, NSApplicationDelegate {
     @objc private func setOpacity(_ s: NSMenuItem) { player?.setOpacity(CGFloat(s.tag) / 100) }
     @objc private func snap(_ s: NSMenuItem) { player?.snap(s.tag) }
     @objc private func closePlayer() { player?.close() }
+    @objc private func toggleStats(_ s: NSMenuItem) {
+        let on = !UserDefaults.standard.bool(forKey: "showStats")
+        UserDefaults.standard.set(on, forKey: "showStats")
+        s.state = on ? .on : .off
+        player?.showStats(nil)
+    }
 }
 
 // MARK: - Chrome native messaging: UInt32 little-endian length + UTF-8 JSON.

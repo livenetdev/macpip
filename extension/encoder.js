@@ -8,9 +8,11 @@ globalThis.MacPiPEncoder ??= class {
     this.enc = null;
     this.w = this.h = this.n = 0;
     this.wantKey = true;
+    this.stats = { enc: 0, drop: 0, out: 0, bytes: 0 };
   }
 
   static b64(u8) {
+    if (u8.toBase64) return u8.toBase64();
     let s = '';
     for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
     return btoa(s);
@@ -24,8 +26,9 @@ globalThis.MacPiPEncoder ??= class {
       w = Math.max(2, Math.round((w * s) / 2) * 2);
       h = Math.max(2, Math.round((h * s) / 2) * 2);
       if (!this.enc || this.enc.state !== 'configured' || w !== this.w || h !== this.h) this.configure(w, h);
-      if (!this.enc || this.enc.encodeQueueSize > 2) return; // failed (retrying) or behind: drop, never queue latency
+      if (!this.enc || this.enc.encodeQueueSize > 2) { this.stats.drop++; return; } // failed (retrying) or behind: drop, never queue latency
       this.enc.encode(frame, { keyFrame: this.wantKey || this.n++ % 180 === 0 });
+      this.stats.enc++;
       this.wantKey = false;
     } catch (e) {
       this.send({ k: 'log', msg: `encode: ${e.message}` });
@@ -46,6 +49,7 @@ globalThis.MacPiPEncoder ??= class {
         }
         const buf = new Uint8Array(chunk.byteLength);
         chunk.copyTo(buf);
+        this.stats.out++; this.stats.bytes += buf.length;
         this.send({ k: 'f', key: chunk.type === 'key', d: MacPiPEncoder.b64(buf) });
       },
       error: (e) => {
@@ -66,5 +70,6 @@ globalThis.MacPiPEncoder ??= class {
   }
 
   key() { this.wantKey = true; }
+  takeStats() { const s = this.stats; this.stats = { enc: 0, drop: 0, out: 0, bytes: 0 }; return s; }
   close() { try { this.enc?.close(); } catch (_) {} this.enc = null; }
 };

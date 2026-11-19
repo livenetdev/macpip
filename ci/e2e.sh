@@ -18,10 +18,13 @@ npx -y @puppeteer/browsers install chrome@stable --path /tmp/cft > /tmp/cft.log 
 CFT=$(find /tmp/cft -path "*Contents/MacOS/Google Chrome for Testing" | head -1); echo "CfT: $CFT"
 "$BIN" --setup-quiet "$PROFILE"
 EXT="$HOME/Library/Application Support/MacPiP/extension"
+defaults write io.github.macpip showStats -bool true
+URL="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_5MB.mp4"
+curl -sfI "$URL" >/dev/null || URL="https://www.w3schools.com/html/mov_bbb.mp4"; echo "video: $URL"
 
 MACPIP_DEBUG=1 "$CFT" --user-data-dir="$PROFILE" --load-extension="$EXT" --disable-features=DisableLoadExtensionCommandLineSwitch \
   --remote-debugging-port=9222 --no-first-run --no-default-browser-check --autoplay-policy=no-user-gesture-required \
-  "https://www.w3schools.com/html/mov_bbb.mp4" > /tmp/cft-out.log 2>&1 &
+  "$URL" > /tmp/cft-out.log 2>&1 &
 for i in $(seq 40); do curl -sf localhost:9222/json >/dev/null && break; sleep 1; done; sleep 4
 node ci/cdp.mjs play
 node ci/cdp.mjs measure   # baseline: tab visible
@@ -41,4 +44,7 @@ echo "== MacPiP active, Chrome hidden behind fullscreen Terminal"
 fullscreenTerminal
 node ci/cdp.mjs measure
 wins; shot fs1; sleep 2; shot fs2
-grep -ai "macpip" /tmp/cft-out.log | tail -30 || true
+sleep 4
+echo "== per-second pipeline counters (last lines are while hidden behind fullscreen Terminal)"
+grep -a "macpip: tab " /tmp/cft-out.log | tail -12 || true
+grep -a "macpip: extension" /tmp/cft-out.log | tail -5 || true

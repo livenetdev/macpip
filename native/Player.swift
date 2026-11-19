@@ -13,6 +13,8 @@ final class Player: NSPanel, NSWindowDelegate {
     private var aspect = CGSize(width: 16, height: 9)
     private let root = HoverView()
     private let bar = Bar()
+    private let stats = NSTextField(labelWithString: "")
+    private var shown = 0
     private var keyMonitor: Any?
     private var closing = false
     private let defaults = UserDefaults.standard
@@ -61,6 +63,19 @@ final class Player: NSPanel, NSWindowDelegate {
         }
         root.addSubview(bar)
 
+        stats.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        stats.textColor = .white
+        stats.backgroundColor = NSColor.black.withAlphaComponent(0.55)
+        stats.drawsBackground = true
+        stats.isHidden = true
+        stats.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stats)
+        NSLayoutConstraint.activate([
+            stats.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
+            stats.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
+            stats.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -6),
+        ])
+
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, e.window === self else { return e }
             switch e.keyCode {
@@ -96,6 +111,15 @@ final class Player: NSPanel, NSWindowDelegate {
         guard let format, let sb = Self.sample(data, key: key, format: format) else { return }
         if renderStatus == .failed { flushRenderer(); onCommand?(["cmd": "key"]) ; return }
         enqueueSample(sb)
+        shown += 1
+    }
+
+    func takeShown() -> Int { defer { shown = 0 }; return shown }
+
+    /// Pipeline counters overlay (menu bar ▸ Show Frame Rate). nil = just apply the on/off setting.
+    func showStats(_ line: String?) {
+        stats.isHidden = !defaults.bool(forKey: "showStats")
+        if let line { stats.stringValue = " " + line + " " }
     }
 
     func setState(paused: Bool, muted: Bool) { bar.setState(paused: paused, muted: muted) }
